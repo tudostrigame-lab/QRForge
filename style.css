@@ -56,3 +56,23 @@ button {
 #qr {
     margin-top: 24px;
 }
+.actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 12px;
+}
+
+.actions button {
+    margin-top: 0;
+}
+
+.secondary {
+    background: #e5e5e5;
+    color: #111;
+}
+
+#qr img,
+#qr canvas {
+    max-width: 100%;
+    border-radius: 8px;
+}
