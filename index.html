@@ -3,15 +3,26 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>QRForge</title>
+
+    <title>QRForge — QR Code Generator</title>
+
     <link rel="stylesheet" href="style.css">
 </head>
 
 <body>
 
     <main class="app">
-        <h1>QRForge</h1>
-        <p>Создавай QR-коды за несколько секунд</p>
+
+        <div class="header">
+            <div class="logo">QRForge</div>
+            <button id="themeButton" class="theme-button">🌙</button>
+        </div>
+
+        <h1>Создай QR-код</h1>
+
+        <p class="description">
+            Быстро создавай и скачивай QR-коды из текста или ссылок.
+        </p>
 
         <input
             id="text"
@@ -19,24 +30,58 @@
             placeholder="Введите текст или ссылку"
         >
 
-        <button id="generateButton">
+        <div class="settings">
+
+            <label>
+                Размер
+                <select id="size">
+                    <option value="180">180 × 180</option>
+                    <option value="220" selected>220 × 220</option>
+                    <option value="300">300 × 300</option>
+                </select>
+            </label>
+
+            <label>
+                Цвет
+                <input id="color" type="color" value="#000000">
+            </label>
+
+        </div>
+
+        <button id="generateButton" class="primary">
             Создать QR-код
         </button>
 
-      <div id="qr"></div>
+        <div id="qr"></div>
 
-<div class="actions">
-    <button id="downloadButton" hidden>
-        Скачать QR-код
-    </button>
+        <div class="actions">
 
-    <button id="clearButton" class="secondary">
-        Очистить
-    </button>
-</div>
+            <button id="downloadButton" hidden>
+                📥 Скачать PNG
+            </button>
+
+            <button id="svgButton" hidden>
+                📄 Скачать SVG
+            </button>
+
+            <button id="copyButton" hidden>
+                📋 Копировать
+            </button>
+
+            <button id="clearButton" class="secondary">
+                Очистить
+            </button>
+
+        </div>
+
+        <p class="footer">
+            QRForge · Simple QR Generator
+        </p>
+
     </main>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="script.js"></script>
+    <script src="script.js"></script>
+
 </body>
 </html>
