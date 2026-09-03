@@ -3673,7 +3673,370 @@ ${message}
    MAIN RETURN
    ========================================================= */
 
-  return (
+ /* =========================================================
+   NEXUS
+   PART 4 / 10
+   AI CONTEXT ENGINE
+   ========================================================= */
+
+/*
+  Единый контекст NEXUS для будущего настоящего AI.
+
+  Здесь собираются:
+  - текущий чат
+  - последние сообщения
+  - память
+  - задачи
+  - календарь
+  - заметки
+  - таймеры
+  - файлы
+  - настройки
+  - текущая дата и время
+
+  Пока AI использует локальный режим.
+  В следующей части этот контекст подключим
+  к AI-движку.
+*/
+
+/* =========================================================
+   AI CONTEXT LIMITS
+   ========================================================= */
+
+const NEXUS_AI_LIMITS = {
+  messages: 20,
+  memory: 30,
+  notes: 15,
+  tasks: 20,
+  events: 20,
+  timers: 10,
+  files: 30,
+};
+
+
+/* =========================================================
+   RECENT CHAT MESSAGES
+   ========================================================= */
+
+const nexusAIRecentMessages =
+  activeChat?.messages
+    ?.slice(
+      -NEXUS_AI_LIMITS.messages
+    )
+    .map(
+      message => ({
+        role:
+          message.role,
+        text:
+          message.text,
+        createdAt:
+          message.createdAt,
+      })
+    ) || [];
+
+
+/* =========================================================
+   MEMORY CONTEXT
+   ========================================================= */
+
+const nexusAIMemory =
+  memoryEnabled
+    ? memory
+        .slice(
+          0,
+          NEXUS_AI_LIMITS.memory
+        )
+        .map(
+          item => ({
+            text:
+              item.text,
+            category:
+              item.category,
+            createdAt:
+              item.createdAt,
+          })
+        )
+    : [];
+
+
+/* =========================================================
+   NOTES CONTEXT
+   ========================================================= */
+
+const nexusAINotes =
+  notes
+    .slice(
+      0,
+      NEXUS_AI_LIMITS.notes
+    )
+    .map(
+      note => ({
+        title:
+          note.title,
+        content:
+          note.content,
+        createdAt:
+          note.createdAt,
+        updatedAt:
+          note.updatedAt,
+      })
+    );
+
+
+/* =========================================================
+   TASKS CONTEXT
+   ========================================================= */
+
+const nexusAITasks =
+  tasks
+    .slice(
+      0,
+      NEXUS_AI_LIMITS.tasks
+    )
+    .map(
+      task => ({
+        title:
+          task.title,
+        description:
+          task.description,
+        completed:
+          task.completed,
+        dueDate:
+          task.dueDate,
+        dueTime:
+          task.dueTime,
+      })
+    );
+
+
+/* =========================================================
+   CALENDAR CONTEXT
+   ========================================================= */
+
+const nexusAIEvents =
+  events
+    .slice(
+      0,
+      NEXUS_AI_LIMITS.events
+    )
+    .map(
+      event => ({
+        title:
+          event.title,
+        description:
+          event.description,
+        date:
+          event.date,
+        time:
+          event.time,
+      })
+    );
+
+
+/* =========================================================
+   TIMER CONTEXT
+   ========================================================= */
+
+const nexusAITimers =
+  timers
+    .slice(
+      0,
+      NEXUS_AI_LIMITS.timers
+    )
+    .map(
+      timer => ({
+        name:
+          timer.name,
+        duration:
+          timer.duration,
+        remaining:
+          timer.remaining,
+        running:
+          timer.running,
+      })
+    );
+
+
+/* =========================================================
+   FILE SYSTEM CONTEXT
+   ========================================================= */
+
+const nexusAIFiles =
+  files
+    .slice(
+      0,
+      NEXUS_AI_LIMITS.files
+    )
+    .map(
+      file => ({
+        name:
+          file.name,
+        type:
+          file.type,
+        parentId:
+          file.parentId,
+      })
+    );
+
+
+/* =========================================================
+   FULL NEXUS AI CONTEXT
+   ========================================================= */
+
+const buildNexusAIContext = (
+  userMessage: string
+): string => {
+
+  const context = {
+    application: {
+      name:
+        "NEXUS",
+      language:
+        language,
+    },
+
+    current: {
+      date:
+        getDateKey(now),
+      dateText:
+        formatDate(now),
+      time:
+        formatTime(now),
+    },
+
+    chat: {
+      id:
+        activeChat?.id ||
+        null,
+
+      title:
+        activeChat?.title ||
+        "Новый чат",
+
+      messages:
+        nexusAIRecentMessages,
+    },
+
+    userMessage:
+      userMessage,
+
+    memory: {
+      enabled:
+        memoryEnabled,
+
+      items:
+        nexusAIMemory,
+    },
+
+    notes:
+      nexusAINotes,
+
+    tasks:
+      nexusAITasks,
+
+    calendar:
+      nexusAIEvents,
+
+    timers:
+      nexusAITimers,
+
+    files:
+      nexusAIFiles,
+
+    settings: {
+      language:
+        language,
+
+      notifications:
+        notifications,
+
+      darkMode:
+        darkMode,
+
+      autoSave:
+        autoSave,
+    },
+  };
+
+  return JSON.stringify(
+    context,
+    null,
+    2
+  );
+};
+
+
+/* =========================================================
+   AI CONTEXT STATISTICS
+   ========================================================= */
+
+const nexusAIContextStats = {
+  messages:
+    nexusAIRecentMessages.length,
+
+  memory:
+    nexusAIMemory.length,
+
+  notes:
+    nexusAINotes.length,
+
+  tasks:
+    nexusAITasks.length,
+
+  events:
+    nexusAIEvents.length,
+
+  timers:
+    nexusAITimers.length,
+
+  files:
+    nexusAIFiles.length,
+};
+
+
+/* =========================================================
+   AI CONTEXT TEST
+   ========================================================= */
+
+const getNexusAIContext =
+  (
+    userMessage: string
+  ): string => {
+
+    const context =
+      buildNexusAIContext(
+        userMessage
+      );
+
+    console.log(
+      "NEXUS AI CONTEXT:",
+      context
+    );
+
+    return context;
+  };
+
+
+/* =========================================================
+   AI CONTEXT STATUS
+   ========================================================= */
+
+const nexusAIContextReady =
+  Boolean(
+    activeChat ||
+    memory.length ||
+    notes.length ||
+    tasks.length ||
+    events.length ||
+    timers.length ||
+    files.length
+  );
+
+
+/* =========================================================
+   END OF PART 4
+   ========================================================= */
+return (
     <main
       className={
         darkMode
