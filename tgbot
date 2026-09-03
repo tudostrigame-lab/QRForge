@@ -1,0 +1,5869 @@
+"use client";
+
+import { useEffect, useMemo, useRef, useState } from "react";
+
+/* =========================================================
+   NEXUS
+   PART 1 / 10
+
+   Фундамент приложения:
+   - типы данных
+   - состояние
+   - память
+   - чаты
+   - заметки
+   - задачи
+   - календарь
+   - часы
+   - таймеры
+   - настройки
+   - локальное сохранение
+
+   ВАЖНО:
+   Эта часть специально НЕ закрывает компонент.
+   Следующие части будут добавляться прямо в конец файла.
+   ========================================================= */
+
+
+/* =========================================================
+   TYPES
+   ========================================================= */
+
+type Role = "user" | "assistant";
+
+type Section =
+  | "chat"
+  | "memory"
+  | "notes"
+  | "tasks"
+  | "calendar"
+  | "clock"
+  | "files"
+  | "settings";
+
+type Message = {
+  id: string;
+  role: Role;
+  text: string;
+  createdAt: number;
+};
+
+type Chat = {
+  id: string;
+  title: string;
+  messages: Message[];
+  createdAt: number;
+  updatedAt: number;
+};
+
+type MemoryCategory =
+  | "fact"
+  | "preference"
+  | "goal"
+  | "project"
+  | "important";
+
+type MemoryItem = {
+  id: string;
+  text: string;
+  category: MemoryCategory;
+  createdAt: number;
+};
+
+type Note = {
+  id: string;
+  title: string;
+  content: string;
+  createdAt: number;
+  updatedAt: number;
+};
+
+type Task = {
+  id: string;
+  title: string;
+  description: string;
+  completed: boolean;
+  dueDate: string;
+  dueTime: string;
+  createdAt: number;
+};
+
+type CalendarEvent = {
+  id: string;
+  title: string;
+  description: string;
+  date: string;
+  time: string;
+  createdAt: number;
+};
+
+type Timer = {
+  id: string;
+  name: string;
+  duration: number;
+  remaining: number;
+  running: boolean;
+};
+
+type NexusFile = {
+  id: string;
+  name: string;
+  type: "file" | "folder";
+  parentId: string | null;
+  content?: string;
+  createdAt: number;
+  updatedAt: number;
+};
+
+
+/* =========================================================
+   CONSTANTS
+   ========================================================= */
+
+const STORAGE_KEY =
+  "nexus_local_storage_v1";
+
+const DEFAULT_LANGUAGE =
+  "Русский";
+
+
+/* =========================================================
+   HELPERS
+   ========================================================= */
+
+const createId = (): string => {
+  if (
+    typeof crypto !== "undefined" &&
+    typeof crypto.randomUUID === "function"
+  ) {
+    return crypto.randomUUID();
+  }
+
+  return (
+    Date.now().toString(36) +
+    Math.random()
+      .toString(36)
+      .substring(2)
+  );
+};
+
+
+const getDateKey = (
+  date: Date = new Date()
+): string => {
+  const year =
+    date.getFullYear();
+
+  const month = String(
+    date.getMonth() + 1
+  ).padStart(2, "0");
+
+  const day = String(
+    date.getDate()
+  ).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+};
+
+
+const formatTime = (
+  date: Date
+): string => {
+  return date.toLocaleTimeString(
+    "ru-RU",
+    {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    }
+  );
+};
+
+
+const formatDate = (
+  date: Date
+): string => {
+  return date.toLocaleDateString(
+    "ru-RU",
+    {
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    }
+  );
+};
+
+
+const formatShortDate = (
+  value: string
+): string => {
+  if (!value) {
+    return "";
+  }
+
+  const parts =
+    value.split("-");
+
+  if (
+    parts.length !== 3
+  ) {
+    return value;
+  }
+
+  return `${parts[2]}.${parts[1]}.${parts[0]}`;
+};
+
+
+const formatDuration = (
+  seconds: number
+): string => {
+  const safe =
+    Math.max(
+      0,
+      Math.floor(seconds)
+    );
+
+  const hours =
+    Math.floor(
+      safe / 3600
+    );
+
+  const minutes =
+    Math.floor(
+      (safe % 3600) / 60
+    );
+
+  const remainingSeconds =
+    safe % 60;
+
+  if (hours > 0) {
+    return `${String(hours).padStart(
+      2,
+      "0"
+    )}:${String(minutes).padStart(
+      2,
+      "0"
+    )}:${String(
+      remainingSeconds
+    ).padStart(2, "0")}`;
+  }
+
+  return `${String(
+    minutes
+  ).padStart(
+    2,
+    "0"
+  )}:${String(
+    remainingSeconds
+  ).padStart(
+    2,
+    "0"
+  )}`;
+};
+
+
+/* =========================================================
+   INITIAL CHAT
+   ========================================================= */
+
+const createInitialChat = (): Chat => ({
+  id: createId(),
+  title: "Новый чат",
+  messages: [],
+  createdAt: Date.now(),
+  updatedAt: Date.now(),
+});
+
+
+/* =========================================================
+   MAIN COMPONENT
+   ========================================================= */
+
+export default function Home() {
+
+  /* =======================================================
+     NAVIGATION
+     ======================================================= */
+
+  const [
+    section,
+    setSection,
+  ] = useState<Section>(
+    "chat"
+  );
+
+  const [
+    sidebarOpen,
+    setSidebarOpen,
+  ] = useState(true);
+
+  const [
+    mobileMenuOpen,
+    setMobileMenuOpen,
+  ] = useState(false);
+
+
+  /* =======================================================
+     CHAT STATE
+     ======================================================= */
+
+  const [
+    chats,
+    setChats,
+  ] = useState<Chat[]>([]);
+
+  const [
+    activeChatId,
+    setActiveChatId,
+  ] = useState<string | null>(
+    null
+  );
+
+  const [
+    input,
+    setInput,
+  ] = useState("");
+
+  const [
+    thinking,
+    setThinking,
+  ] = useState(false);
+
+  const [
+    error,
+    setError,
+  ] = useState("");
+
+
+  /* =======================================================
+     MEMORY STATE
+     ======================================================= */
+
+  const [
+    memory,
+    setMemory,
+  ] = useState<MemoryItem[]>(
+    []
+  );
+
+  const [
+    memoryEnabled,
+    setMemoryEnabled,
+  ] = useState(true);
+
+  const [
+    memorySearch,
+    setMemorySearch,
+  ] = useState("");
+
+
+  /* =======================================================
+     NOTES STATE
+     ======================================================= */
+
+  const [
+    notes,
+    setNotes,
+  ] = useState<Note[]>([]);
+
+  const [
+    activeNoteId,
+    setActiveNoteId,
+  ] = useState<string | null>(
+    null
+  );
+
+  const [
+    noteTitle,
+    setNoteTitle,
+  ] = useState("");
+
+  const [
+    noteContent,
+    setNoteContent,
+  ] = useState("");
+
+  const [
+    noteEditorOpen,
+    setNoteEditorOpen,
+  ] = useState(false);
+
+
+  /* =======================================================
+     TASKS STATE
+     ======================================================= */
+
+  const [
+    tasks,
+    setTasks,
+  ] = useState<Task[]>([]);
+
+  const [
+    taskTitle,
+    setTaskTitle,
+  ] = useState("");
+
+  const [
+    taskDescription,
+    setTaskDescription,
+  ] = useState("");
+
+  const [
+    taskDueDate,
+    setTaskDueDate,
+  ] = useState("");
+
+  const [
+    taskDueTime,
+    setTaskDueTime,
+  ] = useState("");
+
+  const [
+    taskEditorOpen,
+    setTaskEditorOpen,
+  ] = useState(false);
+
+
+  /* =======================================================
+     CALENDAR STATE
+     ======================================================= */
+
+  const [
+    events,
+    setEvents,
+  ] = useState<CalendarEvent[]>(
+    []
+  );
+
+  const [
+    selectedDate,
+    setSelectedDate,
+  ] = useState(
+    getDateKey()
+  );
+
+  const [
+    calendarMonth,
+    setCalendarMonth,
+  ] = useState(
+    new Date()
+  );
+
+  const [
+    eventTitle,
+    setEventTitle,
+  ] = useState("");
+
+  const [
+    eventDescription,
+    setEventDescription,
+  ] = useState("");
+
+  const [
+    eventDate,
+    setEventDate,
+  ] = useState(
+    getDateKey()
+  );
+
+  const [
+    eventTime,
+    setEventTime,
+  ] = useState("");
+
+  const [
+    eventEditorOpen,
+    setEventEditorOpen,
+  ] = useState(false);
+
+
+  /* =======================================================
+     CLOCK STATE
+     ======================================================= */
+
+  const [
+    now,
+    setNow,
+  ] = useState(
+    new Date()
+  );
+
+
+  /* =======================================================
+     TIMER STATE
+     ======================================================= */
+
+  const [
+    timers,
+    setTimers,
+  ] = useState<Timer[]>(
+    []
+  );
+
+  const [
+    timerName,
+    setTimerName,
+  ] = useState("");
+
+  const [
+    timerMinutes,
+    setTimerMinutes,
+  ] = useState("5");
+
+  const [
+    timerSeconds,
+    setTimerSeconds,
+  ] = useState("0");
+
+  const [
+    timerEditorOpen,
+    setTimerEditorOpen,
+  ] = useState(false);
+
+
+  /* =======================================================
+     FILE SYSTEM STATE
+     ======================================================= */
+
+  const [
+    files,
+    setFiles,
+  ] = useState<NexusFile[]>(
+    []
+  );
+
+  const [
+    currentFolderId,
+    setCurrentFolderId,
+  ] = useState<string | null>(
+    null
+  );
+
+  const [
+    newFileName,
+    setNewFileName,
+  ] = useState("");
+
+  const [
+    newFolderName,
+    setNewFolderName,
+  ] = useState("");
+
+
+  /* =======================================================
+     SETTINGS
+     ======================================================= */
+
+  const [
+    language,
+    setLanguage,
+  ] = useState(
+    DEFAULT_LANGUAGE
+  );
+
+  const [
+    notifications,
+    setNotifications,
+  ] = useState(true);
+
+  const [
+    darkMode,
+    setDarkMode,
+  ] = useState(false);
+
+  const [
+    autoSave,
+    setAutoSave,
+  ] = useState(true);
+
+
+  /* =======================================================
+     SEARCH
+     ======================================================= */
+
+  const [
+    search,
+    setSearch,
+  ] = useState("");
+
+  const [
+    searchOpen,
+    setSearchOpen,
+  ] = useState(false);
+
+
+  /* =======================================================
+     REFS
+     ======================================================= */
+
+  const inputRef =
+    useRef<HTMLTextAreaElement | null>(
+      null
+    );
+
+
+  /* =======================================================
+     INITIALIZATION
+     ======================================================= */
+
+  useEffect(() => {
+
+    const initial =
+      createInitialChat();
+
+    setChats([
+      initial,
+    ]);
+
+    setActiveChatId(
+      initial.id
+    );
+
+  }, []);
+
+
+  /* =======================================================
+     LIVE CLOCK
+     ======================================================= */
+
+  useEffect(() => {
+
+    const interval =
+      window.setInterval(
+        () => {
+          setNow(
+            new Date()
+          );
+        },
+        1000
+      );
+
+    return () => {
+      window.clearInterval(
+        interval
+      );
+    };
+
+  }, []);
+
+
+  /* =======================================================
+     TIMER ENGINE
+     ======================================================= */
+
+  useEffect(() => {
+
+    const interval =
+      window.setInterval(
+        () => {
+
+          setTimers(
+            current =>
+              current.map(
+                timer => {
+
+                  if (
+                    !timer.running
+                  ) {
+                    return timer;
+                  }
+
+                  if (
+                    timer.remaining <=
+                    1
+                  ) {
+
+                    if (
+                      notifications &&
+                      typeof window !==
+                        "undefined"
+                    ) {
+                      try {
+                        if (
+                          "Notification" in
+                          window &&
+                          Notification.permission ===
+                            "granted"
+                        ) {
+                          new Notification(
+                            `NEXUS: ${timer.name}`,
+                            {
+                              body:
+                                "Таймер завершён.",
+                            }
+                          );
+                        }
+                      } catch {
+                        // Notification unavailable
+                      }
+                    }
+
+                    return {
+                      ...timer,
+                      remaining: 0,
+                      running: false,
+                    };
+                  }
+
+                  return {
+                    ...timer,
+                    remaining:
+                      timer.remaining -
+                      1,
+                  };
+                }
+              )
+          );
+
+        },
+        1000
+      );
+
+    return () => {
+      window.clearInterval(
+        interval
+      );
+    };
+
+  }, [
+    notifications,
+  ]);
+
+
+  /* =======================================================
+     LOCAL STORAGE — LOAD
+     ======================================================= */
+
+  useEffect(() => {
+
+    try {
+
+      const saved =
+        window.localStorage.getItem(
+          STORAGE_KEY
+        );
+
+      if (!saved) {
+        return;
+      }
+
+      const data =
+        JSON.parse(saved);
+
+      if (
+        Array.isArray(
+          data.chats
+        )
+      ) {
+        setChats(
+          data.chats
+        );
+
+        if (
+          data.activeChatId
+        ) {
+          setActiveChatId(
+            data.activeChatId
+          );
+        } else if (
+          data.chats.length
+        ) {
+          setActiveChatId(
+            data.chats[0].id
+          );
+        }
+      }
+
+      if (
+        Array.isArray(
+          data.memory
+        )
+      ) {
+        setMemory(
+          data.memory
+        );
+      }
+
+      if (
+        Array.isArray(
+          data.notes
+        )
+      ) {
+        setNotes(
+          data.notes
+        );
+      }
+
+      if (
+        Array.isArray(
+          data.tasks
+        )
+      ) {
+        setTasks(
+          data.tasks
+        );
+      }
+
+      if (
+        Array.isArray(
+          data.events
+        )
+      ) {
+        setEvents(
+          data.events
+        );
+      }
+
+      if (
+        Array.isArray(
+          data.timers
+        )
+      ) {
+        setTimers(
+          data.timers
+        );
+      }
+
+      if (
+        Array.isArray(
+          data.files
+        )
+      ) {
+        setFiles(
+          data.files
+        );
+      }
+
+      if (
+        typeof data.language ===
+        "string"
+      ) {
+        setLanguage(
+          data.language
+        );
+      }
+
+      if (
+        typeof data.memoryEnabled ===
+        "boolean"
+      ) {
+        setMemoryEnabled(
+          data.memoryEnabled
+        );
+      }
+
+      if (
+        typeof data.notifications ===
+        "boolean"
+      ) {
+        setNotifications(
+          data.notifications
+        );
+      }
+
+      if (
+        typeof data.darkMode ===
+        "boolean"
+      ) {
+        setDarkMode(
+          data.darkMode
+        );
+      }
+
+      if (
+        typeof data.autoSave ===
+        "boolean"
+      ) {
+        setAutoSave(
+          data.autoSave
+        );
+      }
+
+    } catch (
+      storageError
+    ) {
+
+      console.error(
+        "NEXUS storage load error:",
+        storageError
+      );
+
+    }
+
+  }, []);
+
+
+  /* =======================================================
+     LOCAL STORAGE — SAVE
+     ======================================================= */
+
+  useEffect(() => {
+
+    if (!autoSave) {
+      return;
+    }
+
+    /*
+      Небольшая задержка не нужна:
+      localStorage достаточно быстрый
+      для такого локального прототипа.
+    */
+
+    try {
+
+      const data = {
+        chats,
+        activeChatId,
+        memory,
+        notes,
+        tasks,
+        events,
+        timers,
+        files,
+        language,
+        memoryEnabled,
+        notifications,
+        darkMode,
+        autoSave,
+      };
+
+      window.localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify(data)
+      );
+
+    } catch (
+      storageError
+    ) {
+
+      console.error(
+        "NEXUS storage save error:",
+        storageError
+      );
+
+    }
+
+  }, [
+    chats,
+    activeChatId,
+    memory,
+    notes,
+    tasks,
+    events,
+    timers,
+    files,
+    language,
+    memoryEnabled,
+    notifications,
+    darkMode,
+    autoSave,
+  ]);
+
+
+  /* =======================================================
+     DERIVED DATA
+     ======================================================= */
+
+  const activeChat =
+    chats.find(
+      chat =>
+        chat.id ===
+        activeChatId
+    ) || null;
+
+
+  const activeNote =
+    notes.find(
+      note =>
+        note.id ===
+        activeNoteId
+    ) || null;
+
+
+  const selectedEvents =
+    events.filter(
+      event =>
+        event.date ===
+        selectedDate
+    );
+
+
+  const filteredMemory =
+    useMemo(() => {
+
+      const query =
+        memorySearch
+          .trim()
+          .toLowerCase();
+
+      if (!query) {
+        return memory;
+      }
+
+      return memory.filter(
+        item =>
+          item.text
+            .toLowerCase()
+            .includes(
+              query
+            ) ||
+          item.category
+            .toLowerCase()
+            .includes(
+              query
+            )
+      );
+
+    }, [
+      memory,
+      memorySearch,
+    ]);
+
+
+  const pendingTasks =
+    useMemo(() => {
+
+      return tasks.filter(
+        task =>
+          !task.completed
+      );
+
+    }, [
+      tasks,
+    ]);
+
+
+  const completedTasks =
+    useMemo(() => {
+
+      return tasks.filter(
+        task =>
+          task.completed
+      );
+
+    }, [
+      tasks,
+    ]);
+
+
+  const currentFolderFiles =
+    useMemo(() => {
+
+      return files.filter(
+        file =>
+          file.parentId ===
+          currentFolderId
+      );
+
+    }, [
+      files,
+      currentFolderId,
+    ]);
+
+
+  /* =======================================================
+     BASIC NAVIGATION
+     ======================================================= */
+
+  const openSection = (
+    next: Section
+  ) => {
+
+    setSection(
+      next
+    );
+
+    setMobileMenuOpen(
+      false
+    );
+  };
+
+
+  /* =======================================================
+     CHAT CREATION
+     ======================================================= */
+
+  const createChat = (
+    title = "Новый чат"
+  ): Chat => {
+
+    const chat: Chat = {
+      id: createId(),
+      title,
+      messages: [],
+      createdAt:
+        Date.now(),
+      updatedAt:
+        Date.now(),
+    };
+
+    setChats(
+      current => [
+        chat,
+        ...current,
+      ]
+    );
+
+    setActiveChatId(
+      chat.id
+    );
+
+    setSection(
+      "chat"
+    );
+
+    return chat;
+  };
+
+
+  /* =======================================================
+     CHAT SELECTION
+     ======================================================= */
+
+  const selectChat = (
+    chatId: string
+  ) => {
+
+    setActiveChatId(
+      chatId
+    );
+
+    setSection(
+      "chat"
+    );
+
+    setMobileMenuOpen(
+      false
+    );
+  };
+
+
+  /* =======================================================
+     CHAT DELETE
+     ======================================================= */
+
+  const deleteChat = (
+    chatId: string
+  ) => {
+
+    const remaining =
+      chats.filter(
+        chat =>
+          chat.id !==
+          chatId
+      );
+
+    if (
+      remaining.length === 0
+    ) {
+
+      const newChat =
+        createInitialChat();
+
+      setChats([
+        newChat,
+      ]);
+
+      setActiveChatId(
+        newChat.id
+      );
+
+      return;
+    }
+
+    setChats(
+      remaining
+    );
+
+    if (
+      activeChatId ===
+      chatId
+    ) {
+      setActiveChatId(
+        remaining[0].id
+      );
+    }
+  };
+
+
+  /* =======================================================
+     CHAT RENAME
+     ======================================================= */
+
+  const renameChat = (
+    chatId: string,
+    title: string
+  ) => {
+
+    const clean =
+      title.trim();
+
+    if (!clean) {
+      return;
+    }
+
+    setChats(
+      current =>
+        current.map(
+          chat =>
+            chat.id ===
+            chatId
+              ? {
+                  ...chat,
+                  title:
+                    clean,
+                  updatedAt:
+                    Date.now(),
+                }
+              : chat
+        )
+    );
+  };
+
+
+  /* =======================================================
+     ADD MESSAGE
+     ======================================================= */
+
+  const addMessage = (
+    chatId: string,
+    role: Role,
+    text: string
+  ) => {
+
+    const message: Message = {
+      id: createId(),
+      role,
+      text,
+      createdAt:
+        Date.now(),
+    };
+
+    setChats(
+      current =>
+        current.map(
+          chat =>
+            chat.id ===
+            chatId
+              ? {
+                  ...chat,
+                  messages: [
+                    ...chat.messages,
+                    message,
+                  ],
+                  updatedAt:
+                    Date.now(),
+                }
+              : chat
+        )
+    );
+  };
+
+
+  /* =======================================================
+     MEMORY
+     ======================================================= */
+
+  const remember = (
+    text: string,
+    category: MemoryCategory =
+      "fact"
+  ) => {
+
+    if (
+      !memoryEnabled
+    ) {
+      return;
+    }
+
+    const clean =
+      text.trim();
+
+    if (!clean) {
+      return;
+    }
+
+    const duplicate =
+      memory.some(
+        item =>
+          item.text
+            .trim()
+            .toLowerCase() ===
+          clean
+            .toLowerCase()
+      );
+
+    if (
+      duplicate
+    ) {
+      return;
+    }
+
+    const item: MemoryItem = {
+      id: createId(),
+      text: clean,
+      category,
+      createdAt:
+        Date.now(),
+    };
+
+    setMemory(
+      current => [
+        item,
+        ...current,
+      ]
+    );
+  };
+
+
+  const forgetMemory = (
+    memoryId: string
+  ) => {
+
+    setMemory(
+      current =>
+        current.filter(
+          item =>
+            item.id !==
+            memoryId
+        )
+    );
+  };
+
+
+  const clearMemory = () => {
+
+    setMemory([]);
+  };
+
+
+  /* =======================================================
+     MEMORY AUTO DETECTION
+     ======================================================= */
+
+  const detectMemory = (
+    text: string
+  ) => {
+
+    if (
+      !memoryEnabled
+    ) {
+      return;
+    }
+
+    const lower =
+      text.toLowerCase();
+
+    if (
+      lower.includes(
+        "мне нравится"
+      ) ||
+      lower.includes(
+        "я люблю"
+      ) ||
+      lower.includes(
+        "я предпочитаю"
+      ) ||
+      lower.includes(
+        "мне не нравится"
+      ) ||
+      lower.includes(
+        "я не люблю"
+      )
+    ) {
+
+      remember(
+        text,
+        "preference"
+      );
+
+      return;
+    }
+
+
+    if (
+      lower.includes(
+        "я хочу"
+      ) ||
+      lower.includes(
+        "моя цель"
+      ) ||
+      lower.includes(
+        "я планирую"
+      ) ||
+      lower.includes(
+        "я собираюсь"
+      )
+    ) {
+
+      remember(
+        text,
+        "goal"
+      );
+
+      return;
+    }
+
+
+    if (
+      lower.includes(
+        "мой проект"
+      ) ||
+      lower.includes(
+        "моё приложение"
+      ) ||
+      lower.includes(
+        "мое приложение"
+      ) ||
+      lower.includes(
+        "мой бот"
+      )
+    ) {
+
+      remember(
+        text,
+        "project"
+      );
+    }
+  };
+
+
+  /* =======================================================
+     NOTES
+     ======================================================= */
+
+  const createNote = () => {
+
+    if (
+      !noteTitle.trim() &&
+      !noteContent.trim()
+    ) {
+      return;
+    }
+
+    const note: Note = {
+      id: createId(),
+      title:
+        noteTitle.trim() ||
+        "Новая заметка",
+      content:
+        noteContent.trim(),
+      createdAt:
+        Date.now(),
+      updatedAt:
+        Date.now(),
+    };
+
+    setNotes(
+      current => [
+        note,
+        ...current,
+      ]
+    );
+
+    setActiveNoteId(
+      note.id
+    );
+
+    setNoteTitle("");
+    setNoteContent("");
+    setNoteEditorOpen(
+      false
+    );
+  };
+
+
+  const updateNote = (
+    noteId: string,
+    title: string,
+    content: string
+  ) => {
+
+    setNotes(
+      current =>
+        current.map(
+          note =>
+            note.id ===
+            noteId
+              ? {
+                  ...note,
+                  title,
+                  content,
+                  updatedAt:
+                    Date.now(),
+                }
+              : note
+        )
+    );
+  };
+
+
+  const deleteNote = (
+    noteId: string
+  ) => {
+
+    setNotes(
+      current =>
+        current.filter(
+          note =>
+            note.id !==
+            noteId
+        )
+    );
+
+    if (
+      activeNoteId ===
+      noteId
+    ) {
+      setActiveNoteId(
+        null
+      );
+    }
+  };
+
+
+  /* =======================================================
+     TASKS
+     ======================================================= */
+
+  const createTask = () => {
+
+    if (
+      !taskTitle.trim()
+    ) {
+      return;
+    }
+
+    const task: Task = {
+      id: createId(),
+      title:
+        taskTitle.trim(),
+      description:
+        taskDescription.trim(),
+      completed:
+        false,
+      dueDate:
+        taskDueDate,
+      dueTime:
+        taskDueTime,
+      createdAt:
+        Date.now(),
+    };
+
+    setTasks(
+      current => [
+        task,
+        ...current,
+      ]
+    );
+
+    setTaskTitle("");
+    setTaskDescription("");
+    setTaskDueDate("");
+    setTaskDueTime("");
+    setTaskEditorOpen(
+      false
+    );
+  };
+
+
+  const toggleTask = (
+    taskId: string
+  ) => {
+
+    setTasks(
+      current =>
+        current.map(
+          task =>
+            task.id ===
+            taskId
+              ? {
+                  ...task,
+                  completed:
+                    !task.completed,
+                }
+              : task
+        )
+    );
+  };
+
+
+  const deleteTask = (
+    taskId: string
+  ) => {
+
+    setTasks(
+      current =>
+        current.filter(
+          task =>
+            task.id !==
+            taskId
+        )
+    );
+  };
+
+
+  /* =======================================================
+     CALENDAR
+     ======================================================= */
+
+  const createEvent = () => {
+
+    if (
+      !eventTitle.trim() ||
+      !eventDate
+    ) {
+      return;
+    }
+
+    const event:
+      CalendarEvent = {
+      id: createId(),
+      title:
+        eventTitle.trim(),
+      description:
+        eventDescription.trim(),
+      date:
+        eventDate,
+      time:
+        eventTime,
+      createdAt:
+        Date.now(),
+    };
+
+    setEvents(
+      current => [
+        ...current,
+        event,
+      ]
+    );
+
+    setSelectedDate(
+      eventDate
+    );
+
+    setEventTitle("");
+    setEventDescription("");
+    setEventTime("");
+    setEventEditorOpen(
+      false
+    );
+  };
+
+
+  const deleteEvent = (
+    eventId: string
+  ) => {
+
+    setEvents(
+      current =>
+        current.filter(
+          event =>
+            event.id !==
+            eventId
+        )
+    );
+  };
+
+
+  /* =======================================================
+     TIMERS
+     ======================================================= */
+
+  const createTimer = () => {
+
+    const minutes =
+      Math.max(
+        0,
+        Number(
+          timerMinutes
+        ) || 0
+      );
+
+    const seconds =
+      Math.max(
+        0,
+        Number(
+          timerSeconds
+        ) || 0
+      );
+
+    const duration =
+      minutes * 60 +
+      seconds;
+
+    if (
+      duration <= 0
+    ) {
+      return;
+    }
+
+    const timer: Timer = {
+      id: createId(),
+      name:
+        timerName.trim() ||
+        "Таймер",
+      duration,
+      remaining:
+        duration,
+      running:
+        false,
+    };
+
+    setTimers(
+      current => [
+        ...current,
+        timer,
+      ]
+    );
+
+    setTimerName("");
+    setTimerMinutes("5");
+    setTimerSeconds("0");
+    setTimerEditorOpen(
+      false
+    );
+  };
+
+
+  const toggleTimer = (
+    timerId: string
+  ) => {
+
+    setTimers(
+      current =>
+        current.map(
+          timer =>
+            timer.id ===
+            timerId
+              ? {
+                  ...timer,
+                  running:
+                    timer.remaining >
+                    0
+                      ? !timer.running
+                      : false,
+                }
+              : timer
+        )
+    );
+  };
+
+
+  const resetTimer = (
+    timerId: string
+  ) => {
+
+    setTimers(
+      current =>
+        current.map(
+          timer =>
+            timer.id ===
+            timerId
+              ? {
+                  ...timer,
+                  remaining:
+                    timer.duration,
+                  running:
+                    false,
+                }
+              : timer
+        )
+    );
+  };
+
+
+  const deleteTimer = (
+    timerId: string
+  ) => {
+
+    setTimers(
+      current =>
+        current.filter(
+          timer =>
+            timer.id !==
+            timerId
+        )
+    );
+  };
+
+
+  /* =======================================================
+     FILE SYSTEM
+     ======================================================= */
+
+  const createFolder = () => {
+
+    const name =
+      newFolderName.trim();
+
+    if (!name) {
+      return;
+    }
+
+    const folder:
+      NexusFile = {
+      id: createId(),
+      name,
+      type: "folder",
+      parentId:
+        currentFolderId,
+      createdAt:
+        Date.now(),
+      updatedAt:
+        Date.now(),
+    };
+
+    setFiles(
+      current => [
+        ...current,
+        folder,
+      ]
+    );
+
+    setNewFolderName("");
+  };
+
+
+  const createFile = () => {
+
+    const name =
+      newFileName.trim();
+
+    if (!name) {
+      return;
+    }
+
+    const file:
+      NexusFile = {
+      id: createId(),
+      name,
+      type: "file",
+      parentId:
+        currentFolderId,
+      content: "",
+      createdAt:
+        Date.now(),
+      updatedAt:
+        Date.now(),
+    };
+
+    setFiles(
+      current => [
+        ...current,
+        file,
+      ]
+    );
+
+    setNewFileName("");
+  };
+
+
+  const deleteFile = (
+    fileId: string
+  ) => {
+
+    const idsToDelete =
+      new Set<string>();
+
+    const collect =
+      (parentId: string) => {
+
+        idsToDelete.add(
+          parentId
+        );
+
+        files
+          .filter(
+            file =>
+              file.parentId ===
+              parentId
+          )
+          .forEach(
+            child => {
+
+              if (
+                child.type ===
+                "folder"
+              ) {
+                collect(
+                  child.id
+                );
+              } else {
+                idsToDelete.add(
+                  child.id
+                );
+              }
+            }
+          );
+      };
+
+    collect(
+      fileId
+    );
+
+    setFiles(
+      current =>
+        current.filter(
+          file =>
+            !idsToDelete.has(
+              file.id
+            )
+        )
+    );
+  };
+
+
+  const updateFileContent = (
+    fileId: string,
+    content: string
+  ) => {
+
+    setFiles(
+      current =>
+        current.map(
+          file =>
+            file.id ===
+            fileId
+              ? {
+                  ...file,
+                  content,
+                  updatedAt:
+                    Date.now(),
+                }
+              : file
+        )
+    );
+  };
+
+
+  /* =======================================================
+     NOTIFICATION PERMISSION
+     ======================================================= */
+
+  const requestNotifications =
+    async () => {
+
+      if (
+        typeof window ===
+        "undefined"
+      ) {
+        return;
+      }
+
+      if (
+        !(
+          "Notification" in
+          window
+        )
+      ) {
+        return;
+      }
+
+      try {
+
+        await Notification.requestPermission();
+
+      } catch {
+        // Browser does not allow permission request
+      }
+    };
+
+
+  /* =======================================================
+     CONTEXT FOR AI
+     ======================================================= */
+
+  const buildAIContext = (
+    message: string
+  ): string => {
+
+    const memoryContext =
+      memoryEnabled &&
+      memory.length > 0
+        ? memory
+            .map(
+              item =>
+                `[${item.category}] ${item.text}`
+            )
+            .join("\n")
+        : "Память отсутствует.";
+
+    const history =
+      activeChat &&
+      activeChat.messages.length >
+        0
+        ? activeChat.messages
+            .slice(-30)
+            .map(
+              item =>
+                `${
+                  item.role ===
+                  "user"
+                    ? "Пользователь"
+                    : "NEXUS"
+                }: ${item.text}`
+            )
+            .join("\n")
+        : "История отсутствует.";
+
+    const taskContext =
+      tasks.length > 0
+        ? tasks
+            .map(
+              task =>
+                `${
+                  task.completed
+                    ? "✓"
+                    : "○"
+                } ${task.title}${
+                  task.dueDate
+                    ? ` — ${formatShortDate(
+                        task.dueDate
+                      )}`
+                    : ""
+                }${
+                  task.dueTime
+                    ? ` ${task.dueTime}`
+                    : ""
+                }`
+            )
+            .join("\n")
+        : "Задач нет.";
+
+    const eventContext =
+      events.length > 0
+        ? events
+            .map(
+              event =>
+                `${formatShortDate(
+                  event.date
+                )} ${
+                  event.time ||
+                  ""
+                } — ${
+                  event.title
+                }`
+            )
+            .join("\n")
+        : "Событий нет.";
+
+    const noteContext =
+      notes.length > 0
+        ? notes
+            .slice(0, 20)
+            .map(
+              note =>
+                `${note.title}: ${note.content}`
+            )
+            .join("\n")
+        : "Заметок нет.";
+
+    return `
+Ты — NEXUS, персональный AI.
+
+NEXUS должен вести себя естественно
+и адаптироваться под пользователя,
+не имея заранее заданного характера.
+
+Учитывай контекст, если он действительно
+относится к текущему вопросу.
+
+Не выдумывай действия, которые
+не были выполнены.
+
+ТЕКУЩАЯ ДАТА:
+${formatDate(now)}
+
+ТЕКУЩЕЕ ВРЕМЯ:
+${formatTime(now)}
+
+ЯЗЫК:
+${language}
+
+ПАМЯТЬ:
+${memoryContext}
+
+ИСТОРИЯ ЧАТА:
+${history}
+
+ЗАДАЧИ:
+${taskContext}
+
+КАЛЕНДАРЬ:
+${eventContext}
+
+ЗАМЕТКИ:
+${noteContext}
+
+ТЕКУЩЕЕ СООБЩЕНИЕ:
+${message}
+`;
+  };
+
+
+  /* =======================================================
+     SEARCH DATA
+     ======================================================= */
+
+  const searchResults =
+    useMemo(() => {
+
+      const query =
+        search
+          .trim()
+          .toLowerCase();
+
+      if (!query) {
+        return [];
+      }
+
+      const results: {
+        type: string;
+        id: string;
+        title: string;
+        text: string;
+      }[] = [];
+
+
+      chats.forEach(
+        chat => {
+
+          if (
+            chat.title
+              .toLowerCase()
+              .includes(query)
+          ) {
+
+            results.push({
+              type: "Чат",
+              id: chat.id,
+              title:
+                chat.title,
+              text:
+                "Открыть чат",
+            });
+          }
+
+          chat.messages.forEach(
+            message => {
+
+              if (
+                message.text
+                  .toLowerCase()
+                  .includes(query)
+              ) {
+
+                results.push({
+                  type: "Сообщение",
+                  id:
+                    message.id,
+                  title:
+                    chat.title,
+                  text:
+                    message.text,
+                });
+              }
+            }
+          );
+        }
+      );
+
+
+      notes.forEach(
+        note => {
+
+          if (
+            note.title
+              .toLowerCase()
+              .includes(query) ||
+            note.content
+              .toLowerCase()
+              .includes(query)
+          ) {
+
+            results.push({
+              type: "Заметка",
+              id: note.id,
+              title:
+                note.title,
+              text:
+                note.content,
+            });
+          }
+        }
+      );
+
+
+      tasks.forEach(
+        task => {
+
+          if (
+            task.title
+              .toLowerCase()
+              .includes(query) ||
+            task.description
+              .toLowerCase()
+              .includes(query)
+          ) {
+
+            results.push({
+              type: "Задача",
+              id: task.id,
+              title:
+                task.title,
+              text:
+                task.description,
+            });
+          }
+        }
+      );
+
+
+      events.forEach(
+        event => {
+
+          if (
+            event.title
+              .toLowerCase()
+              .includes(query) ||
+            event.description
+              .toLowerCase()
+              .includes(query)
+          ) {
+
+            results.push({
+              type: "Событие",
+              id: event.id,
+              title:
+                event.title,
+              text:
+                event.description,
+            });
+          }
+        }
+      );
+
+
+      memory.forEach(
+        item => {
+
+          if (
+            item.text
+              .toLowerCase()
+              .includes(query)
+          ) {
+
+            results.push({
+              type: "Память",
+              id: item.id,
+              title:
+                item.category,
+              text:
+                item.text,
+            });
+          }
+        }
+      );
+
+
+      return results.slice(
+        0,
+        50
+      );
+
+    }, [
+      search,
+      chats,
+      notes,
+      tasks,
+      events,
+      memory,
+    ]);
+
+
+/* =========================================================
+   END OF PART 1
+
+   НЕ ДОБАВЛЯЙ СЮДА НИКАКОЙ СТАРЫЙ КОД.
+
+   В следующей части продолжим этот же компонент.
+   ========================================================= */
+/* =========================================================
+   NEXUS
+   PART 2 / 10
+   CHAT ENGINE + LOCAL TEST AI
+   ========================================================= */
+
+
+/* =========================================================
+   LOCAL TEST AI
+   ========================================================= */
+
+  const generateLocalAIResponse = (
+    userMessage: string
+  ): string => {
+
+    const text =
+      userMessage
+        .trim()
+        .toLowerCase();
+
+    const context =
+      buildAIContext(
+        userMessage
+      );
+
+    /*
+      Пока здесь находится тестовый AI.
+
+      Позже этот блок можно заменить
+      на настоящий API / Telegram Bot backend.
+
+      Важно:
+      интерфейс NEXUS при этом менять
+      практически не придётся.
+    */
+
+    console.log(
+      "NEXUS AI CONTEXT:",
+      context
+    );
+
+
+    /* -----------------------------------------
+       Приветствия
+       ----------------------------------------- */
+
+    if (
+      text === "привет" ||
+      text === "здравствуй" ||
+      text === "здравствуйте" ||
+      text.startsWith("привет ")
+    ) {
+
+      return (
+        "Привет! Я NEXUS. " +
+        "Готов помочь. Что будем делать?"
+      );
+    }
+
+
+    /* -----------------------------------------
+       Как дела
+       ----------------------------------------- */
+
+    if (
+      text.includes(
+        "как дела"
+      ) ||
+      text.includes(
+        "как ты"
+      )
+    ) {
+
+      return (
+        "Всё работает нормально. " +
+        "Я готов продолжать."
+      );
+    }
+
+
+    /* -----------------------------------------
+       Кто ты
+       ----------------------------------------- */
+
+    if (
+      text.includes(
+        "кто ты"
+      ) ||
+      text.includes(
+        "что ты такое"
+      )
+    ) {
+
+      return (
+        "Я NEXUS — персональный AI-" +
+        "ассистент. Сейчас я работаю " +
+        "в локальном тестовом режиме."
+      );
+    }
+
+
+    /* -----------------------------------------
+       Текущее время
+       ----------------------------------------- */
+
+    if (
+      text.includes(
+        "который час"
+      ) ||
+      text.includes(
+        "сколько времени"
+      ) ||
+      text === "время"
+    ) {
+
+      return (
+        `Сейчас ${formatTime(
+          now
+        )}.`
+      );
+    }
+
+
+    /* -----------------------------------------
+       Сегодняшняя дата
+       ----------------------------------------- */
+
+    if (
+      text.includes(
+        "какая сегодня дата"
+      ) ||
+      text.includes(
+        "какой сегодня день"
+      ) ||
+      text === "дата"
+    ) {
+
+      return (
+        `Сегодня ${formatDate(
+          now
+        )}.`
+      );
+    }
+
+
+    /* -----------------------------------------
+       Память
+       ----------------------------------------- */
+
+    if (
+      text.includes(
+        "что ты помнишь"
+      ) ||
+      text.includes(
+        "что ты обо мне знаешь"
+      )
+    ) {
+
+      if (
+        memory.length === 0
+      ) {
+
+        return (
+          "Пока в моей памяти " +
+          "ничего нет."
+        );
+      }
+
+      const memoryText =
+        memory
+          .slice(0, 10)
+          .map(
+            item =>
+              `• ${item.text}`
+          )
+          .join("\n");
+
+      return (
+        "Вот что сейчас находится " +
+        "в моей памяти:\n\n" +
+        memoryText
+      );
+    }
+
+
+    /* -----------------------------------------
+       Количество памяти
+       ----------------------------------------- */
+
+    if (
+      text.includes(
+        "сколько ты помнишь"
+      )
+    ) {
+
+      return (
+        `Сейчас в памяти ${
+          memory.length
+        } ${
+          memory.length === 1
+            ? "запись"
+            : "записей"
+        }.`
+      );
+    }
+
+
+    /* -----------------------------------------
+       Задачи
+       ----------------------------------------- */
+
+    if (
+      text.includes(
+        "мои задачи"
+      ) ||
+      text.includes(
+        "какие у меня задачи"
+      )
+    ) {
+
+      if (
+        pendingTasks.length === 0
+      ) {
+
+        return (
+          "Сейчас нет невыполненных задач."
+        );
+      }
+
+      return (
+        "Твои текущие задачи:\n\n" +
+        pendingTasks
+          .slice(0, 10)
+          .map(
+            task =>
+              `• ${task.title}${
+                task.dueDate
+                  ? ` — ${formatShortDate(
+                      task.dueDate
+                    )}`
+                  : ""
+              }`
+          )
+          .join("\n")
+      );
+    }
+
+
+    /* -----------------------------------------
+       Календарь
+       ----------------------------------------- */
+
+    if (
+      text.includes(
+        "мой календарь"
+      ) ||
+      text.includes(
+        "что у меня в календаре"
+      ) ||
+      text.includes(
+        "какие у меня события"
+      )
+    ) {
+
+      if (
+        events.length === 0
+      ) {
+
+        return (
+          "В календаре пока нет событий."
+        );
+      }
+
+      return (
+        "События в календаре:\n\n" +
+        events
+          .slice()
+          .sort(
+            (
+              a,
+              b
+            ) =>
+              `${a.date}${a.time}`.localeCompare(
+                `${b.date}${b.time}`
+              )
+          )
+          .slice(0, 10)
+          .map(
+            event =>
+              `• ${
+                formatShortDate(
+                  event.date
+                )
+              }${
+                event.time
+                  ? ` ${event.time}`
+                  : ""
+              } — ${
+                event.title
+              }`
+          )
+          .join("\n")
+      );
+    }
+
+
+    /* -----------------------------------------
+       Заметки
+       ----------------------------------------- */
+
+    if (
+      text.includes(
+        "мои заметки"
+      ) ||
+      text.includes(
+        "какие у меня заметки"
+      )
+    ) {
+
+      if (
+        notes.length === 0
+      ) {
+
+        return (
+          "У тебя пока нет заметок."
+        );
+      }
+
+      return (
+        "Твои заметки:\n\n" +
+        notes
+          .slice(0, 10)
+          .map(
+            note =>
+              `• ${note.title}`
+          )
+          .join("\n")
+      );
+    }
+
+
+    /* -----------------------------------------
+       Таймеры
+       ----------------------------------------- */
+
+    if (
+      text.includes(
+        "мои таймеры"
+      ) ||
+      text.includes(
+        "какие таймеры"
+      )
+    ) {
+
+      if (
+        timers.length === 0
+      ) {
+
+        return (
+          "Активных таймеров нет."
+        );
+      }
+
+      return (
+        "Таймеры:\n\n" +
+        timers
+          .map(
+            timer =>
+              `• ${
+                timer.name
+              } — ${
+                formatDuration(
+                  timer.remaining
+                )
+              }${
+                timer.running
+                  ? " ▶"
+                  : " ⏸"
+              }`
+          )
+          .join("\n")
+      );
+    }
+
+
+    /* -----------------------------------------
+       Помощь
+       ----------------------------------------- */
+
+    if (
+      text === "помощь" ||
+      text === "help" ||
+      text.includes(
+        "что ты умеешь"
+      )
+    ) {
+
+      return (
+        "Сейчас я могу работать с:\n\n" +
+        "• чатами\n" +
+        "• памятью\n" +
+        "• заметками\n" +
+        "• задачами\n" +
+        "• календарём\n" +
+        "• часами\n" +
+        "• таймерами\n" +
+        "• файлами и папками\n\n" +
+        "Позже подключим настоящий AI."
+      );
+    }
+
+
+    /* -----------------------------------------
+       Простые математические выражения
+       ----------------------------------------- */
+
+    if (
+      /^[\d\s+\-*/().]+$/.test(
+        userMessage
+      )
+    ) {
+
+      try {
+
+        /*
+          Это только локальный тестовый
+          обработчик простых примеров.
+        */
+
+        const result =
+          Function(
+            `"use strict"; return (${userMessage})`
+          )();
+
+        if (
+          typeof result ===
+          "number" &&
+          Number.isFinite(
+            result
+          )
+        ) {
+
+          return String(
+            result
+          );
+        }
+
+      } catch {
+        // Не математическое выражение.
+      }
+    }
+
+
+    /* -----------------------------------------
+       Общий тестовый ответ
+       ----------------------------------------- */
+
+    const responses = [
+      "Я понял сообщение. Сейчас я работаю в тестовом локальном режиме, поэтому настоящий AI-ответ подключим позже.",
+      "Сообщение получено. Контекст NEXUS сохранён, а настоящий AI-модуль можно будет подключить следующим этапом.",
+      "Понял. Сейчас это тестовый ответ NEXUS. Архитектура уже подготовлена для подключения настоящей нейросети.",
+      "Я получил твой запрос. Пока отвечаю локально, без внешнего AI API.",
+    ];
+
+
+    const index =
+      Math.floor(
+        Math.random() *
+        responses.length
+      );
+
+    return responses[
+      index
+    ];
+  };
+
+
+/* =========================================================
+   SEND MESSAGE
+   ========================================================= */
+
+  const sendMessage = async () => {
+
+    const clean =
+      input.trim();
+
+    if (
+      !clean ||
+      thinking
+    ) {
+      return;
+    }
+
+
+    setError("");
+
+
+    /* -----------------------------------------
+       Если активного чата нет —
+       создаём новый
+       ----------------------------------------- */
+
+    let chatId =
+      activeChatId;
+
+    if (!chatId) {
+
+      const chat =
+        createChat();
+
+      chatId =
+        chat.id;
+    }
+
+
+    /* -----------------------------------------
+       Добавляем сообщение пользователя
+       ----------------------------------------- */
+
+    addMessage(
+      chatId,
+      "user",
+      clean
+    );
+
+
+    /* -----------------------------------------
+       Первое сообщение автоматически
+       становится названием чата
+       ----------------------------------------- */
+
+    const chat =
+      chats.find(
+        item =>
+          item.id ===
+          chatId
+      );
+
+
+    if (
+      chat &&
+      (
+        chat.messages.length ===
+        0 ||
+        chat.title ===
+        "Новый чат"
+      )
+    ) {
+
+      const title =
+        clean.length > 40
+          ? `${clean.slice(
+              0,
+              40
+            )}…`
+          : clean;
+
+      renameChat(
+        chatId,
+        title
+      );
+    }
+
+
+    /* -----------------------------------------
+       Автоматическая память
+       ----------------------------------------- */
+
+    detectMemory(
+      clean
+    );
+
+
+    setInput("");
+    setThinking(
+      true
+    );
+
+
+    /*
+      Имитируем задержку настоящей
+      нейросети.
+
+      Позже здесь вместо этого
+      будет запрос к backend/API.
+    */
+
+    try {
+
+      await new Promise(
+        resolve =>
+          setTimeout(
+            resolve,
+            500 +
+              Math.random() *
+                700
+          )
+      );
+
+
+      const response =
+        generateLocalAIResponse(
+          clean
+        );
+
+
+      addMessage(
+        chatId,
+        "assistant",
+        response
+      );
+
+    } catch (
+      responseError
+    ) {
+
+      console.error(
+        responseError
+      );
+
+      setError(
+        "Не удалось получить ответ NEXUS."
+      );
+
+    } finally {
+
+      setThinking(
+        false
+      );
+
+      setTimeout(
+        () => {
+          inputRef.current?.focus();
+        },
+        50
+      );
+    }
+  };
+
+
+/* =========================================================
+   CHAT KEYBOARD HANDLER
+   ========================================================= */
+
+  const handleInputKeyDown = (
+    event:
+      React.KeyboardEvent<HTMLTextAreaElement>
+  ) => {
+
+    /*
+      Enter — отправить.
+      Shift + Enter — новая строка.
+    */
+
+    if (
+      event.key ===
+        "Enter" &&
+      !event.shiftKey
+    ) {
+
+      event.preventDefault();
+
+      void sendMessage();
+    }
+  };
+
+
+/* =========================================================
+   QUICK AI COMMANDS
+   ========================================================= */
+
+  const useQuickPrompt = (
+    prompt: string
+  ) => {
+
+    setInput(
+      prompt
+    );
+
+    setSection(
+      "chat"
+    );
+
+    setTimeout(
+      () => {
+        inputRef.current?.focus();
+      },
+      50
+    );
+  };
+
+
+/* =========================================================
+   CHAT CLEAR
+   ========================================================= */
+
+  const clearActiveChat = () => {
+
+    if (
+      !activeChatId
+    ) {
+      return;
+    }
+
+    setChats(
+      current =>
+        current.map(
+          chat =>
+            chat.id ===
+            activeChatId
+              ? {
+                  ...chat,
+                  messages: [],
+                  updatedAt:
+                    Date.now(),
+                }
+              : chat
+        )
+    );
+  };
+
+
+/* =========================================================
+   COPY MESSAGE
+   ========================================================= */
+
+  const copyMessage = async (
+    text: string
+  ) => {
+
+    try {
+
+      await navigator.clipboard.writeText(
+        text
+      );
+
+    } catch {
+
+      /*
+        Fallback для браузеров,
+        где Clipboard API недоступен.
+      */
+
+      try {
+
+        const textarea =
+          document.createElement(
+            "textarea"
+          );
+
+        textarea.value =
+          text;
+
+        textarea.style.position =
+          "fixed";
+
+        textarea.style.opacity =
+          "0";
+
+        document.body.appendChild(
+          textarea
+        );
+
+        textarea.select();
+
+        document.execCommand(
+          "copy"
+        );
+
+        textarea.remove();
+
+      } catch {
+        // Copy unavailable
+      }
+    }
+  };
+
+
+/* =========================================================
+   CHAT EXPORT
+   ========================================================= */
+
+  const exportChat = () => {
+
+    if (
+      !activeChat
+    ) {
+      return;
+    }
+
+    const text =
+      activeChat.messages
+        .map(
+          message =>
+            `${
+              message.role ===
+              "user"
+                ? "Пользователь"
+                : "NEXUS"
+            }:\n${
+              message.text
+            }`
+        )
+        .join(
+          "\n\n"
+        );
+
+
+    const blob =
+      new Blob(
+        [
+          `NEXUS — ${
+            activeChat.title
+          }\n\n${text}`,
+        ],
+        {
+          type:
+            "text/plain;charset=utf-8",
+        }
+      );
+
+
+    const url =
+      URL.createObjectURL(
+        blob
+      );
+
+
+    const link =
+      document.createElement(
+        "a"
+      );
+
+    link.href =
+      url;
+
+    link.download =
+      `${
+        activeChat.title
+          .replace(
+            /[^a-zа-яё0-9_-]/gi,
+            "_"
+          )
+          .slice(0, 50) ||
+        "nexus-chat"
+      }.txt`;
+
+    document.body.appendChild(
+      link
+    );
+
+    link.click();
+
+    link.remove();
+
+    URL.revokeObjectURL(
+      url
+    );
+  };
+
+
+/* =========================================================
+   GLOBAL DATA EXPORT
+   ========================================================= */
+
+  const exportAllData = () => {
+
+    const data = {
+      version: 1,
+      exportedAt:
+        new Date().toISOString(),
+
+      chats,
+      memory,
+      notes,
+      tasks,
+      events,
+      timers,
+      files,
+
+      settings: {
+        language,
+        memoryEnabled,
+        notifications,
+        darkMode,
+        autoSave,
+      },
+    };
+
+
+    const blob =
+      new Blob(
+        [
+          JSON.stringify(
+            data,
+            null,
+            2
+          ),
+        ],
+        {
+          type:
+            "application/json",
+        }
+      );
+
+
+    const url =
+      URL.createObjectURL(
+        blob
+      );
+
+
+    const link =
+      document.createElement(
+        "a"
+      );
+
+    link.href =
+      url;
+
+    link.download =
+      `nexus-backup-${
+        getDateKey()
+      }.json`;
+
+    document.body.appendChild(
+      link
+    );
+
+    link.click();
+
+    link.remove();
+
+    URL.revokeObjectURL(
+      url
+    );
+  };
+
+
+/* =========================================================
+   GLOBAL DATA RESET
+   ========================================================= */
+
+  const resetNexusData = () => {
+
+    const confirmed =
+      window.confirm(
+        "Удалить все локальные данные NEXUS? Это действие нельзя отменить."
+      );
+
+    if (
+      !confirmed
+    ) {
+      return;
+    }
+
+
+    const firstChat =
+      createInitialChat();
+
+
+    setChats([
+      firstChat,
+    ]);
+
+    setActiveChatId(
+      firstChat.id
+    );
+
+    setMemory([]);
+    setNotes([]);
+    setTasks([]);
+    setEvents([]);
+    setTimers([]);
+    setFiles([]);
+
+    setActiveNoteId(
+      null
+    );
+
+    setCurrentFolderId(
+      null
+    );
+
+    setInput("");
+
+    try {
+
+      window.localStorage.removeItem(
+        STORAGE_KEY
+      );
+
+    } catch {
+      // Storage unavailable
+    }
+  };
+
+
+/* =========================================================
+   AI MEMORY COMMAND PARSER
+   ========================================================= */
+
+  const processSpecialCommand = (
+    message: string
+  ): boolean => {
+
+    const clean =
+      message.trim();
+
+    const lower =
+      clean.toLowerCase();
+
+
+    /* -----------------------------------------
+       "Запомни ..."
+       ----------------------------------------- */
+
+    if (
+      lower.startsWith(
+        "запомни "
+      )
+    ) {
+
+      const value =
+        clean
+          .slice(
+            "запомни ".length
+          )
+          .trim();
+
+      if (
+        value
+      ) {
+
+        remember(
+          value,
+          "important"
+        );
+
+        return true;
+      }
+    }
+
+
+    /* -----------------------------------------
+       "Забудь ..."
+       ----------------------------------------- */
+
+    if (
+      lower.startsWith(
+        "забудь "
+      )
+    ) {
+
+      const value =
+        clean
+          .slice(
+            "забудь ".length
+          )
+          .trim()
+          .toLowerCase();
+
+      const found =
+        memory.find(
+          item =>
+            item.text
+              .toLowerCase()
+              .includes(
+                value
+              )
+        );
+
+      if (
+        found
+      ) {
+
+        forgetMemory(
+          found.id
+        );
+      }
+
+      return true;
+    }
+
+
+    return false;
+  };
+
+
+/* =========================================================
+   PATCH SEND MESSAGE WITH SPECIAL COMMANDS
+   ========================================================= */
+
+  const originalSendMessage =
+    sendMessage;
+
+
+/*
+  Этот обработчик является дополнительным
+  уровнем над основным sendMessage.
+
+  Он не ломает обычный чат:
+  если команда не специальная,
+  сообщение отправляется обычным способом.
+*/
+
+  const sendMessageWithCommands =
+    async () => {
+
+      const clean =
+        input.trim();
+
+      if (
+        !clean ||
+        thinking
+      ) {
+        return;
+      }
+
+
+      const handled =
+        processSpecialCommand(
+          clean
+        );
+
+
+      if (
+        handled
+      ) {
+
+        setInput("");
+
+        /*
+          Показываем пользователю,
+          что команда была обработана.
+        */
+
+        let chatId =
+          activeChatId;
+
+        if (!chatId) {
+
+          const chat =
+            createChat();
+
+          chatId =
+            chat.id;
+        }
+
+        addMessage(
+          chatId,
+          "user",
+          clean
+        );
+
+        addMessage(
+          chatId,
+          "assistant",
+          "Готово. Я обработал эту команду."
+        );
+
+        return;
+      }
+
+
+      await originalSendMessage();
+    };
+
+
+/* =========================================================
+   ACTIVE CHAT HELPERS
+   ========================================================= */
+
+  const activeMessages =
+    activeChat?.messages ||
+    [];
+
+
+  const hasMessages =
+    activeMessages.length >
+    0;
+
+
+/* =========================================================
+   CHAT STATISTICS
+   ========================================================= */
+
+  const chatMessageCount =
+    activeMessages.length;
+
+
+  const userMessageCount =
+    activeMessages.filter(
+      message =>
+        message.role ===
+        "user"
+    ).length;
+
+
+  const assistantMessageCount =
+    activeMessages.filter(
+      message =>
+        message.role ===
+        "assistant"
+    ).length;
+
+
+/* =========================================================
+   NEXUS GLOBAL STATISTICS
+   ========================================================= */
+
+  const nexusStatistics = {
+    chats:
+      chats.length,
+
+    messages:
+      chats.reduce(
+        (
+          total,
+          chat
+        ) =>
+          total +
+          chat.messages.length,
+        0
+      ),
+
+    memory:
+      memory.length,
+
+    notes:
+      notes.length,
+
+    tasks:
+      tasks.length,
+
+    completedTasks:
+      completedTasks.length,
+
+    events:
+      events.length,
+
+    timers:
+      timers.length,
+
+    files:
+      files.filter(
+        file =>
+          file.type ===
+          "file"
+      ).length,
+
+    folders:
+      files.filter(
+        file =>
+          file.type ===
+          "folder"
+      ).length,
+  };
+
+
+/* =========================================================
+   PART 2 END
+
+   Следующая часть продолжается прямо здесь.
+   ========================================================= */
+/* =========================================================
+   NEXUS
+   PART 3 / 10
+   MAIN UI + SIDEBAR + CHAT INTERFACE
+   ========================================================= */
+
+
+/* =========================================================
+   UI HELPERS
+   ========================================================= */
+
+  const sectionTitle =
+    section === "chat"
+      ? "Чат"
+      : section === "memory"
+      ? "Память"
+      : section === "notes"
+      ? "Заметки"
+      : section === "tasks"
+      ? "Задачи"
+      : section === "calendar"
+      ? "Календарь"
+      : section === "clock"
+      ? "Часы"
+      : section === "files"
+      ? "Файлы"
+      : "Настройки";
+
+
+  const sectionDescription =
+    section === "chat"
+      ? "Общение с NEXUS"
+      : section === "memory"
+      ? "Информация, которую NEXUS запоминает"
+      : section === "notes"
+      ? "Твои заметки"
+      : section === "tasks"
+      ? "Задачи и планы"
+      : section === "calendar"
+      ? "События и даты"
+      : section === "clock"
+      ? "Время и таймеры"
+      : section === "files"
+      ? "Файлы и папки"
+      : "Настройки NEXUS";
+
+
+/* =========================================================
+   SIDEBAR NAVIGATION ITEM
+   ========================================================= */
+
+  const navigationItems = [
+    {
+      id: "chat" as Section,
+      icon: "◈",
+      label: "Новый чат",
+    },
+    {
+      id: "memory" as Section,
+      icon: "✦",
+      label: "Память",
+    },
+    {
+      id: "notes" as Section,
+      icon: "▤",
+      label: "Заметки",
+    },
+    {
+      id: "tasks" as Section,
+      icon: "✓",
+      label: "Задачи",
+    },
+    {
+      id: "calendar" as Section,
+      icon: "□",
+      label: "Календарь",
+    },
+    {
+      id: "clock" as Section,
+      icon: "◷",
+      label: "Часы",
+    },
+    {
+      id: "files" as Section,
+      icon: "▱",
+      label: "Файлы",
+    },
+  ];
+
+
+/* =========================================================
+   CHAT LIST
+   ========================================================= */
+
+  const sortedChats =
+    [...chats].sort(
+      (
+        a,
+        b
+      ) =>
+        b.updatedAt -
+        a.updatedAt
+    );
+
+
+/* =========================================================
+   CHAT TITLE
+   ========================================================= */
+
+  const currentChatTitle =
+    activeChat?.title ||
+    "Новый чат";
+
+
+/* =========================================================
+   MAIN RETURN
+   ========================================================= */
+
+  return (
+    <main
+      className={
+        darkMode
+          ? "nexus-app nexus-dark"
+          : "nexus-app"
+      }
+    >
+
+      {/* ===================================================
+          GLOBAL STYLE
+          =================================================== */}
+
+      <style jsx global>{`
+
+        * {
+          box-sizing: border-box;
+        }
+
+        html,
+        body {
+          margin: 0;
+          padding: 0;
+          width: 100%;
+          min-height: 100%;
+          font-family:
+            Inter,
+            -apple-system,
+            BlinkMacSystemFont,
+            "Segoe UI",
+            sans-serif;
+        }
+
+        body {
+          background: #f5f6f8;
+        }
+
+        button,
+        input,
+        textarea {
+          font: inherit;
+        }
+
+        button {
+          cursor: pointer;
+        }
+
+        .nexus-app {
+          min-height: 100vh;
+          width: 100%;
+          display: flex;
+          overflow: hidden;
+          background: #f7f8fa;
+          color: #17181b;
+        }
+
+        .nexus-dark {
+          background: #111214;
+          color: #f2f3f5;
+        }
+
+        .nexus-sidebar {
+          width: 270px;
+          min-width: 270px;
+          height: 100vh;
+          display: flex;
+          flex-direction: column;
+          border-right: 1px solid #e5e7eb;
+          background: #ffffff;
+          transition:
+            width .2s ease,
+            min-width .2s ease;
+          z-index: 20;
+        }
+
+        .nexus-dark
+        .nexus-sidebar {
+          background: #18191c;
+          border-color: #292b30;
+        }
+
+        .nexus-sidebar-collapsed {
+          width: 76px;
+          min-width: 76px;
+        }
+
+        .nexus-brand {
+          height: 72px;
+          display: flex;
+          align-items: center;
+          padding: 0 18px;
+          gap: 12px;
+          border-bottom: 1px solid #eceef1;
+        }
+
+        .nexus-dark
+        .nexus-brand {
+          border-color: #292b30;
+        }
+
+        .nexus-logo {
+          width: 38px;
+          height: 38px;
+          border-radius: 12px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: #111318;
+          color: #ffffff;
+          font-size: 18px;
+          font-weight: 800;
+          flex-shrink: 0;
+        }
+
+        .nexus-brand-text {
+          display: flex;
+          flex-direction: column;
+          min-width: 0;
+        }
+
+        .nexus-brand-name {
+          font-size: 17px;
+          font-weight: 800;
+          letter-spacing: .08em;
+        }
+
+        .nexus-brand-version {
+          margin-top: 2px;
+          font-size: 10px;
+          color: #8a8f98;
+          letter-spacing: .08em;
+        }
+
+        .nexus-sidebar-collapsed
+        .nexus-brand-text {
+          display: none;
+        }
+
+        .nexus-sidebar-toggle {
+          margin-left: auto;
+          width: 30px;
+          height: 30px;
+          border: 0;
+          border-radius: 8px;
+          background: transparent;
+          color: #7b8089;
+          font-size: 17px;
+        }
+
+        .nexus-sidebar-toggle:hover {
+          background: #f0f1f3;
+          color: #111318;
+        }
+
+        .nexus-dark
+        .nexus-sidebar-toggle:hover {
+          background: #25272b;
+          color: #ffffff;
+        }
+
+        .nexus-sidebar-collapsed
+        .nexus-sidebar-toggle {
+          display: none;
+        }
+
+        .nexus-sidebar-content {
+          flex: 1;
+          overflow-y: auto;
+          padding: 14px 12px;
+        }
+
+        .nexus-new-chat {
+          width: 100%;
+          height: 44px;
+          border: 1px solid #e1e3e7;
+          border-radius: 11px;
+          background: #ffffff;
+          color: #17181b;
+          display: flex;
+          align-items: center;
+          justify-content: flex-start;
+          gap: 10px;
+          padding: 0 13px;
+          font-weight: 600;
+          transition: .15s ease;
+        }
+
+        .nexus-new-chat:hover {
+          background: #f4f5f7;
+        }
+
+        .nexus-dark
+        .nexus-new-chat {
+          background: #202226;
+          border-color: #303238;
+          color: #f4f5f6;
+        }
+
+        .nexus-dark
+        .nexus-new-chat:hover {
+          background: #292b30;
+        }
+
+        .nexus-collapsed-label {
+          display: none;
+        }
+
+        .nexus-sidebar-collapsed
+        .nexus-new-chat {
+          justify-content: center;
+          padding: 0;
+        }
+
+        .nexus-sidebar-collapsed
+        .nexus-new-chat
+        .nexus-collapsed-label {
+          display: block;
+        }
+
+        .nexus-section-label {
+          margin: 22px 9px 8px;
+          color: #92969e;
+          font-size: 10px;
+          font-weight: 700;
+          text-transform: uppercase;
+          letter-spacing: .09em;
+        }
+
+        .nexus-sidebar-collapsed
+        .nexus-section-label {
+          display: none;
+        }
+
+        .nexus-nav {
+          display: flex;
+          flex-direction: column;
+          gap: 3px;
+        }
+
+        .nexus-nav-button {
+          width: 100%;
+          min-height: 40px;
+          display: flex;
+          align-items: center;
+          gap: 11px;
+          padding: 0 11px;
+          border: 0;
+          border-radius: 9px;
+          background: transparent;
+          color: #656a73;
+          text-align: left;
+          transition: .15s ease;
+        }
+
+        .nexus-nav-button:hover {
+          background: #f1f2f4;
+          color: #202226;
+        }
+
+        .nexus-nav-button-active {
+          background: #eceef1;
+          color: #111318;
+          font-weight: 650;
+        }
+
+        .nexus-dark
+        .nexus-nav-button {
+          color: #a4a8b0;
+        }
+
+        .nexus-dark
+        .nexus-nav-button:hover {
+          background: #24262a;
+          color: #ffffff;
+        }
+
+        .nexus-dark
+        .nexus-nav-button-active {
+          background: #2a2c31;
+          color: #ffffff;
+        }
+
+        .nexus-nav-icon {
+          width: 22px;
+          min-width: 22px;
+          text-align: center;
+          font-size: 16px;
+        }
+
+        .nexus-sidebar-collapsed
+        .nexus-nav-button {
+          justify-content: center;
+          padding: 0;
+        }
+
+        .nexus-sidebar-collapsed
+        .nexus-nav-label {
+          display: none;
+        }
+
+        .nexus-chat-list {
+          margin-top: 7px;
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+        }
+
+        .nexus-chat-item {
+          width: 100%;
+          min-height: 42px;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          border: 0;
+          border-radius: 9px;
+          padding: 7px 9px;
+          background: transparent;
+          color: #555a63;
+          text-align: left;
+        }
+
+        .nexus-chat-item:hover {
+          background: #f1f2f4;
+        }
+
+        .nexus-chat-item-active {
+          background: #eceef1;
+          color: #111318;
+        }
+
+        .nexus-dark
+        .nexus-chat-item {
+          color: #a4a8b0;
+        }
+
+        .nexus-dark
+        .nexus-chat-item:hover {
+          background: #24262a;
+        }
+
+        .nexus-dark
+        .nexus-chat-item-active {
+          background: #2a2c31;
+          color: #ffffff;
+        }
+
+        .nexus-chat-item-icon {
+          width: 22px;
+          min-width: 22px;
+          text-align: center;
+          color: #8b9098;
+        }
+
+        .nexus-chat-item-title {
+          flex: 1;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          font-size: 13px;
+        }
+
+        .nexus-sidebar-collapsed
+        .nexus-chat-list {
+          display: none;
+        }
+
+        .nexus-sidebar-footer {
+          border-top: 1px solid #eceef1;
+          padding: 10px 12px;
+        }
+
+        .nexus-dark
+        .nexus-sidebar-footer {
+          border-color: #292b30;
+        }
+
+        .nexus-settings-button {
+          width: 100%;
+          min-height: 40px;
+          display: flex;
+          align-items: center;
+          gap: 11px;
+          padding: 0 11px;
+          border: 0;
+          border-radius: 9px;
+          background: transparent;
+          color: #656a73;
+          text-align: left;
+        }
+
+        .nexus-settings-button:hover {
+          background: #f1f2f4;
+          color: #17181b;
+        }
+
+        .nexus-dark
+        .nexus-settings-button:hover {
+          background: #24262a;
+          color: #ffffff;
+        }
+
+        .nexus-sidebar-collapsed
+        .nexus-settings-button {
+          justify-content: center;
+          padding: 0;
+        }
+
+        .nexus-sidebar-collapsed
+        .nexus-settings-label {
+          display: none;
+        }
+
+
+        /* =================================================
+           MAIN AREA
+           ================================================= */
+
+        .nexus-main {
+          min-width: 0;
+          flex: 1;
+          height: 100vh;
+          display: flex;
+          flex-direction: column;
+          position: relative;
+        }
+
+        .nexus-topbar {
+          height: 72px;
+          min-height: 72px;
+          border-bottom: 1px solid #e5e7eb;
+          background: rgba(
+            255,
+            255,
+            255,
+            .88
+          );
+          backdrop-filter: blur(14px);
+          display: flex;
+          align-items: center;
+          padding: 0 24px;
+          gap: 14px;
+          z-index: 10;
+        }
+
+        .nexus-dark
+        .nexus-topbar {
+          background: rgba(
+            24,
+            25,
+            28,
+            .9
+          );
+          border-color: #292b30;
+        }
+
+        .nexus-mobile-menu {
+          display: none;
+          width: 36px;
+          height: 36px;
+          border: 0;
+          border-radius: 9px;
+          background: transparent;
+          font-size: 19px;
+        }
+
+        .nexus-dark
+        .nexus-mobile-menu {
+          color: #ffffff;
+        }
+
+        .nexus-topbar-title {
+          min-width: 0;
+          flex: 1;
+        }
+
+        .nexus-topbar-title-main {
+          font-size: 16px;
+          font-weight: 700;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        .nexus-topbar-title-sub {
+          margin-top: 2px;
+          font-size: 11px;
+          color: #8a8f98;
+        }
+
+        .nexus-topbar-actions {
+          display: flex;
+          align-items: center;
+          gap: 5px;
+        }
+
+        .nexus-icon-button {
+          width: 36px;
+          height: 36px;
+          border: 0;
+          border-radius: 9px;
+          background: transparent;
+          color: #676c75;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 16px;
+        }
+
+        .nexus-icon-button:hover {
+          background: #f0f1f3;
+          color: #17181b;
+        }
+
+        .nexus-dark
+        .nexus-icon-button {
+          color: #a5a9b1;
+        }
+
+        .nexus-dark
+        .nexus-icon-button:hover {
+          background: #25272b;
+          color: #ffffff;
+        }
+
+
+        /* =================================================
+           CONTENT
+           ================================================= */
+
+        .nexus-content {
+          flex: 1;
+          min-height: 0;
+          position: relative;
+          display: flex;
+          flex-direction: column;
+        }
+
+
+        /* =================================================
+           CHAT
+           ================================================= */
+
+        .nexus-chat {
+          width: 100%;
+          height: 100%;
+          display: flex;
+          flex-direction: column;
+          min-height: 0;
+        }
+
+        .nexus-messages {
+          flex: 1;
+          overflow-y: auto;
+          padding:
+            34px
+            max(
+              24px,
+              calc(
+                (100vw - 980px) / 2
+              )
+            )
+            170px;
+        }
+
+        .nexus-empty {
+          height: 100%;
+          min-height: 420px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+
+        .nexus-empty-inner {
+          width: min(
+            650px,
+            100%
+          );
+          text-align: center;
+        }
+
+        .nexus-empty-logo {
+          width: 64px;
+          height: 64px;
+          margin: 0 auto 20px;
+          border-radius: 19px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: #111318;
+          color: #ffffff;
+          font-size: 27px;
+          font-weight: 800;
+          box-shadow:
+            0 10px 30px
+            rgba(
+              0,
+              0,
+              0,
+              .12
+            );
+        }
+
+        .nexus-dark
+        .nexus-empty-logo {
+          background: #ffffff;
+          color: #111318;
+        }
+
+        .nexus-empty-title {
+          margin: 0;
+          font-size: 28px;
+          letter-spacing: -.03em;
+        }
+
+        .nexus-empty-description {
+          margin: 10px auto 0;
+          max-width: 520px;
+          color: #858a93;
+          line-height: 1.6;
+          font-size: 14px;
+        }
+
+        .nexus-quick-actions {
+          margin-top: 26px;
+          display: grid;
+          grid-template-columns:
+            repeat(
+              2,
+              minmax(
+                0,
+                1fr
+              )
+            );
+          gap: 10px;
+        }
+
+        .nexus-quick-button {
+          min-height: 48px;
+          border: 1px solid #e1e4e8;
+          border-radius: 12px;
+          background: #ffffff;
+          color: #454a52;
+          text-align: left;
+          padding: 0 14px;
+          transition: .15s ease;
+        }
+
+        .nexus-quick-button:hover {
+          border-color: #cdd1d7;
+          background: #f7f8f9;
+          transform: translateY(
+            -1px
+          );
+        }
+
+        .nexus-dark
+        .nexus-quick-button {
+          background: #1b1c20;
+          border-color: #303238;
+          color: #d7d9dd;
+        }
+
+        .nexus-dark
+        .nexus-quick-button:hover {
+          background: #23252a;
+        }
+
+        .nexus-message {
+          display: flex;
+          gap: 14px;
+          margin-bottom: 25px;
+        }
+
+        .nexus-message-user {
+          flex-direction: row-reverse;
+        }
+
+        .nexus-avatar {
+          width: 34px;
+          height: 34px;
+          min-width: 34px;
+          border-radius: 10px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 12px;
+          font-weight: 800;
+          background: #111318;
+          color: #ffffff;
+        }
+
+        .nexus-message-user
+        .nexus-avatar {
+          background: #e7e9ec;
+          color: #34373d;
+        }
+
+        .nexus-dark
+        .nexus-message-user
+        .nexus-avatar {
+          background: #303238;
+          color: #ffffff;
+        }
+
+        .nexus-message-body {
+          max-width: min(
+            720px,
+            78%
+          );
+          min-width: 0;
+        }
+
+        .nexus-message-user
+        .nexus-message-body {
+          text-align: right;
+        }
+
+        .nexus-message-author {
+          margin-bottom: 5px;
+          font-size: 11px;
+          font-weight: 700;
+          color: #858a93;
+        }
+
+        .nexus-message-text {
+          white-space: pre-wrap;
+          word-break: break-word;
+          line-height: 1.65;
+          font-size: 14px;
+        }
+
+        .nexus-message-user
+        .nexus-message-text {
+          display: inline-block;
+          text-align: left;
+          padding: 10px 14px;
+          border-radius:
+            15px
+            15px
+            4px
+            15px;
+          background: #111318;
+          color: #ffffff;
+        }
+
+        .nexus-dark
+        .nexus-message-user
+        .nexus-message-text {
+          background: #ffffff;
+          color: #15161a;
+        }
+
+        .nexus-message-actions {
+          margin-top: 7px;
+          display: flex;
+          gap: 3px;
+          opacity: 0;
+          transition: opacity .15s;
+        }
+
+        .nexus-message:hover
+        .nexus-message-actions {
+          opacity: 1;
+        }
+
+        .nexus-message-user
+        .nexus-message-actions {
+          justify-content: flex-end;
+        }
+
+        .nexus-message-action {
+          border: 0;
+          background: transparent;
+          color: #9a9ea6;
+          font-size: 11px;
+          padding: 4px 6px;
+          border-radius: 6px;
+        }
+
+        .nexus-message-action:hover {
+          background: #eceef1;
+          color: #33363b;
+        }
+
+        .nexus-dark
+        .nexus-message-action:hover {
+          background: #292b30;
+          color: #ffffff;
+        }
+
+        .nexus-thinking {
+          display: flex;
+          gap: 14px;
+          align-items: flex-start;
+          margin-bottom: 25px;
+        }
+
+        .nexus-thinking-dots {
+          display: flex;
+          gap: 4px;
+          padding: 12px 2px;
+        }
+
+        .nexus-thinking-dot {
+          width: 6px;
+          height: 6px;
+          border-radius: 50%;
+          background: #858a93;
+          animation:
+            nexus-pulse
+            1.2s infinite
+            ease-in-out;
+        }
+
+        .nexus-thinking-dot:nth-child(2) {
+          animation-delay: .15s;
+        }
+
+        .nexus-thinking-dot:nth-child(3) {
+          animation-delay: .3s;
+        }
+
+        @keyframes nexus-pulse {
+          0%,
+          60%,
+          100% {
+            opacity: .3;
+            transform:
+              translateY(0);
+          }
+
+          30% {
+            opacity: 1;
+            transform:
+              translateY(-3px);
+          }
+        }
+
+
+        /* =================================================
+           INPUT AREA
+           ================================================= */
+
+        .nexus-input-area {
+          position: absolute;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          padding:
+            16px
+            max(
+              24px,
+              calc(
+                (100vw - 980px) / 2
+              )
+            )
+            20px;
+          background:
+            linear-gradient(
+              to top,
+              #f7f8fa 70%,
+              rgba(
+                247,
+                248,
+                250,
+                0
+              )
+            );
+        }
+
+        .nexus-dark
+        .nexus-input-area {
+          background:
+            linear-gradient(
+              to top,
+              #111214 70%,
+              rgba(
+                17,
+                18,
+                20,
+                0
+              )
+            );
+        }
+
+        .nexus-input-wrapper {
+          border: 1px solid #dfe2e6;
+          background: #ffffff;
+          border-radius: 16px;
+          box-shadow:
+            0 8px 30px
+            rgba(
+              0,
+              0,
+              0,
+              .07
+            );
+          padding: 9px;
+          display: flex;
+          align-items: flex-end;
+          gap: 8px;
+        }
+
+        .nexus-dark
+        .nexus-input-wrapper {
+          background: #1a1b1f;
+          border-color: #303238;
+          box-shadow:
+            0 8px 30px
+            rgba(
+              0,
+              0,
+              0,
+              .25
+            );
+        }
+
+        .nexus-input {
+          flex: 1;
+          min-width: 0;
+          min-height: 42px;
+          max-height: 150px;
+          resize: none;
+          border: 0;
+          outline: 0;
+          background: transparent;
+          color: #17181b;
+          padding:
+            10px
+            8px;
+          line-height: 1.45;
+        }
+
+        .nexus-dark
+        .nexus-input {
+          color: #f3f4f6;
+        }
+
+        .nexus-input::placeholder {
+          color: #9a9ea6;
+        }
+
+        .nexus-send {
+          width: 42px;
+          height: 42px;
+          min-width: 42px;
+          border: 0;
+          border-radius: 11px;
+          background: #111318;
+          color: #ffffff;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 17px;
+          transition: .15s ease;
+        }
+
+        .nexus-send:hover {
+          transform:
+            translateY(-1px);
+          box-shadow:
+            0 5px 15px
+            rgba(
+              0,
+              0,
+              0,
+              .15
+            );
+        }
+
+        .nexus-send:disabled {
+          opacity: .45;
+          cursor: not-allowed;
+          transform: none;
+          box-shadow: none;
+        }
+
+        .nexus-dark
+        .nexus-send {
+          background: #ffffff;
+          color: #111318;
+        }
+
+        .nexus-input-hint {
+          text-align: center;
+          margin-top: 7px;
+          color: #a0a4ab;
+          font-size: 10px;
+        }
+
+        .nexus-error {
+          margin:
+            0 auto
+            8px;
+          width: min(
+            700px,
+            100%
+          );
+          padding: 9px 12px;
+          border-radius: 9px;
+          background: #fff0f0;
+          color: #b42323;
+          font-size: 12px;
+        }
+
+
+        /* =================================================
+           GENERIC EMPTY SECTIONS
+           ================================================= */
+
+        .nexus-section {
+          flex: 1;
+          min-height: 0;
+          overflow-y: auto;
+          padding: 30px;
+        }
+
+        .nexus-section-inner {
+          width: min(
+            1050px,
+            100%
+          );
+          margin: 0 auto;
+        }
+
+        .nexus-section-heading {
+          margin-bottom: 25px;
+        }
+
+        .nexus-section-heading h1 {
+          margin: 0;
+          font-size: 26px;
+          letter-spacing: -.03em;
+        }
+
+        .nexus-section-heading p {
+          margin:
+            7px
+            0
+            0;
+          color: #8b9098;
+          font-size: 13px;
+        }
+
+
+        /* =================================================
+           MOBILE
+           ================================================= */
+
+        @media (
+          max-width: 760px
+        ) {
+
+          .nexus-sidebar {
+            position: fixed;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            transform:
+              translateX(-100%);
+            box-shadow:
+              10px 0 30px
+              rgba(
+                0,
+                0,
+                0,
+                .15
+              );
+          }
+
+          .nexus-sidebar-mobile-open {
+            transform:
+              translateX(0);
+          }
+
+          .nexus-mobile-menu {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+          }
+
+          .nexus-topbar {
+            padding: 0 14px;
+          }
+
+          .nexus-messages {
+            padding:
+              20px
+              15px
+              160px;
+          }
+
+          .nexus-input-area {
+            padding:
+              12px
+              12px
+              16px;
+          }
+
+          .nexus-message-body {
+            max-width: 84%;
+          }
+
+          .nexus-empty-title {
+            font-size: 24px;
+          }
+
+          .nexus-quick-actions {
+            grid-template-columns:
+              1fr;
+          }
+
+          .nexus-section {
+            padding: 20px 15px;
+          }
+        }
+
+      `}</style>
+
+
+      {/* ===================================================
+          SIDEBAR
+          =================================================== */}
+
+      <aside
+        className={[
+          "nexus-sidebar",
+          !sidebarOpen
+            ? "nexus-sidebar-collapsed"
+            : "",
+          mobileMenuOpen
+            ? "nexus-sidebar-mobile-open"
+            : "",
+        ].join(" ")}
+      >
+
+        {/* Brand */}
+
+        <div
+          className="nexus-brand"
+        >
+
+          <div
+            className="nexus-logo"
+          >
+            N
+          </div>
+
+          <div
+            className="nexus-brand-text"
+          >
+            <div
+              className="nexus-brand-name"
+            >
+              NEXUS
+            </div>
+
+            <div
+              className="nexus-brand-version"
+            >
+              PERSONAL AI
+            </div>
+          </div>
+
+          <button
+            type="button"
+            className="nexus-sidebar-toggle"
+            onClick={() =>
+              setSidebarOpen(
+                false
+              )
+            }
+            aria-label="Свернуть меню"
+          >
+            ‹
+          </button>
+
+        </div>
+
+
+        {/* Sidebar content */}
+
+        <div
+          className="nexus-sidebar-content"
+        >
+
+          <button
+            type="button"
+            className="nexus-new-chat"
+            onClick={() =>
+              createChat()
+            }
+          >
+            <span>
+              ＋
+            </span>
+
+            <span>
+              Новый чат
+            </span>
+
+            <span
+              className="nexus-collapsed-label"
+            >
+              ＋
+            </span>
+          </button>
+
+
+          <div
+            className="nexus-section-label"
+          >
+            Пространство
+          </div>
+
+
+          <nav
+            className="nexus-nav"
+          >
+
+            {navigationItems
+              .filter(
+                item =>
+                  item.id !==
+                  "chat"
+              )
+              .map(
+                item => (
+
+                  <button
+                    key={
+                      item.id
+                    }
+                    type="button"
+                    className={[
+                      "nexus-nav-button",
+                      section ===
+                      item.id
+                        ? "nexus-nav-button-active"
+                        : "",
+                    ].join(" ")}
+                    onClick={() =>
+                      openSection(
+                        item.id
+                      )
+                    }
+                  >
+
+                    <span
+                      className="nexus-nav-icon"
+                    >
+                      {
+                        item.icon
+                      }
+                    </span>
+
+                    <span
+                      className="nexus-nav-label"
+                    >
+                      {
+                        item.label
+                      }
+                    </span>
+
+                  </button>
+
+                )
+              )}
+
+          </nav>
+
+
+          <div
+            className="nexus-section-label"
+          >
+            Чаты
+          </div>
+
+
+          <div
+            className="nexus-chat-list"
+          >
+
+            {sortedChats.length ===
+            0 ? (
+
+              <div
+                style={{
+                  padding:
+                    "10px 9px",
+                  color:
+                    "#999da5",
+                  fontSize:
+                    "12px",
+                }}
+              >
+                Пока нет чатов
+              </div>
+
+            ) : (
+
+              sortedChats
+                .slice(
+                  0,
+                  30
+                )
+                .map(
+                  chat => (
+
+                    <button
+                      key={
+                        chat.id
+                      }
+                      type="button"
+                      className={[
+                        "nexus-chat-item",
+                        activeChatId ===
+                        chat.id
+                          ? "nexus-chat-item-active"
+                          : "",
+                      ].join(
+                        " "
+                      )}
+                      onClick={() =>
+                        selectChat(
+                          chat.id
+                        )
+                      }
+                    >
+
+                      <span
+                        className="nexus-chat-item-icon"
+                      >
+                        ◇
+                      </span>
+
+                      <span
+                        className="nexus-chat-item-title"
+                      >
+                        {
+                          chat.title
+                        }
+                      </span>
+
+                    </button>
+
+                  )
+                )
+
+            )}
+
+          </div>
+
+        </div>
+
+
+        {/* Footer */}
+
+        <div
+          className="nexus-sidebar-footer"
+        >
+
+          <button
+            type="button"
+            className="nexus-settings-button"
+            onClick={() =>
+              openSection(
+                "settings"
+              )
+            }
+          >
+
+            <span
+              className="nexus-nav-icon"
+            >
+              ⚙
+            </span>
+
+            <span
+              className="nexus-settings-label"
+            >
+              Настройки
+            </span>
+
+          </button>
+
+        </div>
+
+      </aside>
+
+
+      {/* ===================================================
+          MAIN
+          =================================================== */}
+
+      <section
+        className="nexus-main"
+      >
+
+        {/* Top bar */}
+
+        <header
+          className="nexus-topbar"
+        >
+
+          <button
+            type="button"
+            className="nexus-mobile-menu"
+            onClick={() =>
+              setMobileMenuOpen(
+                value =>
+                  !value
+              )
+            }
+            aria-label="Меню"
+          >
+            ☰
+          </button>
+
+
+          {!sidebarOpen && (
+            <button
+              type="button"
+              className="nexus-icon-button"
+              onClick={() =>
+                setSidebarOpen(
+                  true
+                )
+              }
+              aria-label="Открыть меню"
+            >
+              ☰
+            </button>
+          )}
+
+
+          <div
+            className="nexus-topbar-title"
+          >
+
+            <div
+              className="nexus-topbar-title-main"
+            >
+              {section ===
+              "chat"
+                ? currentChatTitle
+                : sectionTitle}
+            </div>
+
+            <div
+              className="nexus-topbar-title-sub"
+            >
+              {sectionDescription}
+            </div>
+
+          </div>
+
+
+          <div
+            className="nexus-topbar-actions"
+          >
+
+            <button
+              type="button"
+              className="nexus-icon-button"
+              onClick={() =>
+                setSearchOpen(
+                  value =>
+                    !value
+                )
+              }
+              title="Поиск"
+            >
+              ⌕
+            </button>
+
+
+            {section ===
+              "chat" &&
+              hasMessages && (
+                <>
+                  <button
+                    type="button"
+                    className="nexus-icon-button"
+                    onClick={
+                      exportChat
+                    }
+                    title="Экспорт чата"
+                  >
+                    ⇩
+                  </button>
+
+                  <button
+                    type="button"
+                    className="nexus-icon-button"
+                    onClick={
+                      clearActiveChat
+                    }
+                    title="Очистить чат"
+                  >
+                    ⌫
+                  </button>
+                </>
+              )}
+
+          </div>
+
+        </header>
+
+
+        {/* =================================================
+            SEARCH
+            ================================================= */}
+
+        {searchOpen && (
+          <div
+            style={{
+              position:
+                "absolute",
+              top: "72px",
+              left: 0,
+              right: 0,
+              zIndex: 30,
+              padding:
+                "10px 20px",
+              background:
+                darkMode
+                  ? "#18191c"
+                  : "#ffffff",
+              borderBottom:
+                "1px solid " +
+                (
+                  darkMode
+                    ? "#292b30"
+                    : "#e5e7eb"
+                ),
+            }}
+          >
+
+            <input
+              autoFocus
+              value={search}
+              onChange={event =>
+                setSearch(
+                  event.target.value
+                )
+              }
+              placeholder="Поиск по NEXUS..."
+              style={{
+                width:
+                  "100%",
+                maxWidth:
+                  "900px",
+                display:
+                  "block",
+                margin:
+                  "0 auto",
+                height:
+                  "42px",
+                border:
+                  "1px solid " +
+                  (
+                    darkMode
+                      ? "#303238"
+                      : "#dfe2e6"
+                  ),
+                borderRadius:
+                  "10px",
+                outline:
+                  "none",
+                padding:
+                  "0 13px",
+                background:
+                  darkMode
+                    ? "#202226"
+                    : "#f8f9fa",
+                color:
+                  darkMode
+                    ? "#ffffff"
+                    : "#17181b",
+              }}
+            />
+
+            {search.trim() && (
+              <div
+                style={{
+                  width:
+                    "100%",
+                  maxWidth:
+                    "900px",
+                  margin:
+                    "8px auto 0",
+                  maxHeight:
+                    "300px",
+                  overflowY:
+                    "auto",
+                }}
+              >
+
+                {searchResults.length ===
+                0 ? (
+
+                  <div
+                    style={{
+                      padding:
+                        "15px",
+                      color:
+                        "#8b9098",
+                      fontSize:
+                        "13px",
+                    }}
+                  >
+                    Ничего не найдено
+                  </div>
+
+                ) : (
+
+                  searchResults
+                    .slice(
+                      0,
+                      15
+                    )
+                    .map(
+                      result => (
+
+                        <button
+                          key={
+                            result.id +
+                            result.type
+                          }
+                          type="button"
+                          onClick={() => {
+
+                            if (
+                              result.type ===
+                              "Чат"
+                            ) {
+                              selectChat(
+                                result.id
+                              );
+
+                              setSearchOpen(
+                                false
+                              );
+
+                              setSearch(
+                                ""
+                              );
+                            }
+
+                            if (
+                              result.type ===
+                              "Заметка"
+                            ) {
+                              setSection(
+                                "notes"
+                              );
+
+                              setActiveNoteId(
+                                result.id
+                              );
+
+                              setSearchOpen(
+                                false
+                              );
+
+                              setSearch(
+                                ""
+                              );
+                            }
+
+                            if (
+                              result.type ===
+                              "Задача"
+                            ) {
+                              setSection(
+                                "tasks"
+                              );
+
+                              setSearchOpen(
+                                false
+                              );
+
+                              setSearch(
+                                ""
+                              );
+                            }
+
+                            if (
+                              result.type ===
+                              "Память"
+                            ) {
+                              setSection(
+                                "memory"
+                              );
+
+                              setSearchOpen(
+                                false
+                              );
+
+                              setSearch(
+                                ""
+                              );
+                            }
+
+                            if (
+                              result.type ===
+                              "Событие"
+                            ) {
+                              setSection(
+                                "calendar"
+                              );
+
+                              setSearchOpen(
+                                false
+                              );
+
+                              setSearch(
+                                ""
+                              );
+                            }
+                          }}
+                          style={{
+                            width:
+                              "100%",
+                            border: 0,
+                            borderRadius:
+                              "8px",
+                            background:
+                              "transparent",
+                            padding:
+                              "10px",
+                            textAlign:
+                              "left",
+                            color:
+                              darkMode
+                                ? "#ffffff"
+                                : "#17181b",
+                          }}
+                        >
+
+                          <div
+                            style={{
+                              fontSize:
+                                "11px",
+                              color:
+                                "#8b9098",
+                              marginBottom:
+                                "3px",
+                            }}
+                          >
+                            {
+                              result.type
+                            }
+                          </div>
+
+                          <div
+                            style={{
+                              fontWeight:
+                                650,
+                              fontSize:
+                                "13px",
+                            }}
+                          >
+                            {
+                              result.title
+                            }
+                          </div>
+
+                          <div
+                            style={{
+                              marginTop:
+                                "3px",
+                              fontSize:
+                                "12px",
+                              color:
+                                "#8b9098",
+                              overflow:
+                                "hidden",
+                              textOverflow:
+                                "ellipsis",
+                              whiteSpace:
+                                "nowrap",
+                            }}
+                          >
+                            {
+                              result.text
+                            }
+                          </div>
+
+                        </button>
+
+                      )
+                    )
+
+                )}
+
+              </div>
+            )}
+
+          </div>
+        )}
+
+
+        {/* =================================================
+            CONTENT
+            ================================================= */}
+
+        <div
+          className="nexus-content"
+        >
+
+          {section ===
+            "chat" && (
+
+            <div
+              className="nexus-chat"
+            >
+
+              <div
+                className="nexus-messages"
+              >
+
+                {!hasMessages ? (
+
+                  <div
+                    className="nexus-empty"
+                  >
+
+                    <div
+                      className="nexus-empty-inner"
+                    >
+
+                      <div
+                        className="nexus-empty-logo"
+                      >
+                        N
+                      </div>
+
+                      <h1
+                        className="nexus-empty-title"
+                      >
+                        Чем займёмся?
+                      </h1>
+
+                      <p
+                        className="nexus-empty-description"
+                      >
+                        NEXUS — единое
+                        пространство для
+                        общения, памяти,
+                        задач, заметок,
+                        календаря и файлов.
+                      </p>
+
+
+                      <div
+                        className="nexus-quick-actions"
+                      >
+
+                        <button
+                          type="button"
+                          className="nexus-quick-button"
+                          onClick={() =>
+                            useQuickPrompt(
+                              "Помоги мне спланировать сегодняшний день"
+                            )
+                          }
+                        >
+                          Планирование дня
+                        </button>
+
+                        <button
+                          type="button"
+                          className="nexus-quick-button"
+                          onClick={() =>
+                            useQuickPrompt(
+                              "Что ты сейчас помнишь обо мне?"
+                            )
+                          }
+                        >
+                          Проверить память
+                        </button>
+
+                        <button
+                          type="button"
+                          className="nexus-quick-button"
+                          onClick={() =>
+                            useQuickPrompt(
+                              "Помоги мне составить список задач"
+                            )
+                          }
+                        >
+                          Список задач
+                        </button>
+
+                        <button
+                          type="button"
+                          className="nexus-quick-button"
+                          onClick={() =>
+                            useQuickPrompt(
+                              "Помоги организовать мои планы"
+                            )
+                          }
+                        >
+                          Организовать планы
+                        </button>
+
+                      </div>
+
+                    </div>
+
+                  </div>
+
+                ) : (
+
+                  activeMessages.map(
+                    message => (
+
+                      <div
+                        key={
+                          message.id
+                        }
+                        className={[
+                          "nexus-message",
+                          message.role ===
+                          "user"
+                            ? "nexus-message-user"
+                            : "",
+                        ].join(
+                          " "
+                        )}
+                      >
+
+                        <div
+                          className="nexus-avatar"
+                        >
+                          {
+                            message.role ===
+                            "user"
+                              ? "Я"
+                              : "N"
+                          }
+                        </div>
+
+
+                        <div
+                          className="nexus-message-body"
+                        >
+
+                          <div
+                            className="nexus-message-author"
+                          >
+                            {
+                              message.role ===
+                              "user"
+                                ? "Вы"
+                                : "NEXUS"
+                            }
+                          </div>
+
+
+                          <div
+                            className="nexus-message-text"
+                          >
+                            {
+                              message.text
+                            }
+                          </div>
+
+
+                          <div
+                            className="nexus-message-actions"
+                          >
+
+                            <button
+                              type="button"
+                              className="nexus-message-action"
+                              onClick={() =>
+                                copyMessage(
+                                  message.text
+                                )
+                              }
+                            >
+                              Копировать
+                            </button>
+
+                          </div>
+
+                        </div>
+
+                      </div>
+
+                    )
+                  )
+
+                )}
+
+
+                {thinking && (
+
+                  <div
+                    className="nexus-thinking"
+                  >
+
+                    <div
+                      className="nexus-avatar"
+                    >
+                      N
+                    </div>
+
+                    <div
+                      className="nexus-thinking-dots"
+                    >
+
+                      <span
+                        className="nexus-thinking-dot"
+                      />
+
+                      <span
+                        className="nexus-thinking-dot"
+                      />
+
+                      <span
+                        className="nexus-thinking-dot"
+                      />
+
+                    </div>
+
+                  </div>
+
+                )}
+
+              </div>
+
+
+              {/* Error */}
+
+              {error && (
+                <div
+                  className="nexus-error"
+                >
+                  {
+                    error
+                  }
+                </div>
+              )}
+
+
+              {/* Input */}
+
+              <div
+                className="nexus-input-area"
+              >
+
+                <div
+                  className="nexus-input-wrapper"
+                >
+
+                  <textarea
+                    ref={
+                      inputRef
+                    }
+                    className="nexus-input"
+                    value={
+                      input
+                    }
+                    onChange={
+                      event =>
+                        setInput(
+                          event.target.value
+                        )
+                    }
+                    onKeyDown={
+                      handleInputKeyDown
+                    }
+                    placeholder="Напиши сообщение NEXUS..."
+                    rows={1}
+                    disabled={
+                      thinking
+                    }
+                  />
+
+
+                  <button
+                    type="button"
+                    className="nexus-send"
+                    disabled={
+                      !input.trim() ||
+                      thinking
+                    }
+                    onClick={() =>
+                      void sendMessageWithCommands()
+                    }
+                    aria-label="Отправить"
+                  >
+                    ↑
+                  </button>
+
+                </div>
+
+
+                <div
+                  className="nexus-input-hint"
+                >
+                  Enter — отправить ·
+                  Shift + Enter — новая строка
+                </div>
+
+              </div>
+
+            </div>
+
+          )}
+
+
+          {section !==
+            "chat" && (
+
+            <div
+              className="nexus-section"
+            >
+
+              <div
+                className="nexus-section-inner"
+              >
+
+                <div
+                  className="nexus-section-heading"
+                >
+
+                  <h1>
+                    {
+                      sectionTitle
+                    }
+                  </h1>
+
+                  <p>
+                    {
+                      sectionDescription
+                    }
+                  </p>
+
+                </div>
+
+
+                <div
+                  style={{
+                    border:
+                      "1px dashed " +
+                      (
+                        darkMode
+                          ? "#303238"
+                          : "#d9dce1"
+                      ),
+                    borderRadius:
+                      "16px",
+                    minHeight:
+                      "300px",
+                    display:
+                      "flex",
+                    alignItems:
+                      "center",
+                    justifyContent:
+                      "center",
+                    textAlign:
+                      "center",
+                    color:
+                      "#8b9098",
+                    padding:
+                      "30px",
+                  }}
+                >
+
+                  Интерфейс раздела
+                  <br />
+                  будет добавлен
+                  следующими частями NEXUS.
+
+                </div>
+
+              </div>
+
+            </div>
+
+          )}
+
+        </div>
+
+      </section>
+
+    </main>
+  );
+}
