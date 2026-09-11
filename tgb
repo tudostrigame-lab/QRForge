@@ -1,0 +1,7293 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+
+/* =========================================================
+   NEXUS — PART 1
+   CORE / FOUNDATION
+   ========================================================= */
+
+type NexusRole = "user" | "assistant";
+
+type NexusSection =
+  | "chat"
+  | "memory"
+  | "notes"
+  | "tasks"
+  | "calendar"
+  | "clock"
+  | "timers"
+  | "files"
+  | "settings";
+
+type NexusMessage = {
+  id: string;
+  role: NexusRole;
+  content: string;
+  createdAt: string;
+};
+
+type NexusChat = {
+  id: string;
+  title: string;
+  messages: NexusMessage[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+type NexusMemoryCategory =
+  | "fact"
+  | "preference"
+  | "goal"
+  | "project"
+  | "important";
+
+type NexusMemoryItem = {
+  id: string;
+  text: string;
+  category: NexusMemoryCategory;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type NexusNote = {
+  id: string;
+  title: string;
+  content: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type NexusTask = {
+  id: string;
+  title: string;
+  description: string;
+  completed: boolean;
+  dueDate: string;
+  dueTime: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type NexusCalendarEvent = {
+  id: string;
+  title: string;
+  description: string;
+  date: string;
+  time: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type NexusTimer = {
+  id: string;
+  name: string;
+  duration: number;
+  remaining: number;
+  running: boolean;
+  createdAt: string;
+};
+
+type NexusFile = {
+  id: string;
+  name: string;
+  type: "file" | "folder";
+  parentId: string | null;
+  content: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type NexusSettings = {
+  language: string;
+  notifications: boolean;
+  darkMode: boolean;
+  autoSave: boolean;
+  memoryEnabled: boolean;
+};
+
+type NexusModule = {
+  id: string;
+  title: string;
+  description: string;
+  icon: string;
+  section: NexusSection;
+  order: number;
+};
+
+const NEXUS_VERSION = "1.0.0";
+
+const NEXUS_STORAGE_KEY = "nexus_data_v1";
+
+const NEXUS_MODULES: NexusModule[] = [];
+
+function registerNexusModule(module: NexusModule) {
+  const exists = NEXUS_MODULES.some((item) => item.id === module.id);
+
+  if (!exists) {
+    NEXUS_MODULES.push(module);
+    NEXUS_MODULES.sort((a, b) => a.order - b.order);
+  }
+}
+
+function nexusId(prefix = "nexus") {
+  return `${prefix}_${Date.now()}_${Math.random()
+    .toString(36)
+    .slice(2, 10)}`;
+}
+
+function nexusDate() {
+  return new Date().toISOString();
+}
+
+function nexusDateKey(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
+function nexusTime(date = new Date()) {
+  return date.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function nexusInitialChat(): NexusChat {
+  const now = nexusDate();
+
+  return {
+    id: nexusId("chat"),
+    title: "Новый чат",
+    messages: [
+      {
+        id: nexusId("message"),
+        role: "assistant",
+        content:
+          "Привет. Я NEXUS. Я готов работать с чатами, памятью, задачами, заметками, календарём и другими инструментами.",
+        createdAt: now,
+      },
+    ],
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function nexusInitialSettings(): NexusSettings {
+  return {
+    language: "ru",
+    notifications: true,
+    darkMode: false,
+    autoSave: true,
+    memoryEnabled: true,
+  };
+}
+
+function NexusApp() {
+  const [section, setSection] =
+    useState<NexusSection>("chat");
+
+  const [sidebarOpen, setSidebarOpen] =
+    useState(true);
+
+  const [chats, setChats] = useState<NexusChat[]>(() => [
+    nexusInitialChat(),
+  ]);
+
+  const [activeChatId, setActiveChatId] =
+    useState<string>(() => chats[0]?.id || "");
+
+  const [input, setInput] = useState("");
+
+  const [thinking, setThinking] =
+    useState(false);
+
+  const [error, setError] = useState("");
+
+  const [memory, setMemory] =
+    useState<NexusMemoryItem[]>([]);
+
+  const [notes, setNotes] =
+    useState<NexusNote[]>([]);
+
+  const [tasks, setTasks] =
+    useState<NexusTask[]>([]);
+
+  const [events, setEvents] =
+    useState<NexusCalendarEvent[]>([]);
+
+  const [timers, setTimers] =
+    useState<NexusTimer[]>([]);
+
+  const [files, setFiles] =
+    useState<NexusFile[]>([]);
+
+  const [settings, setSettings] =
+    useState<NexusSettings>(
+      nexusInitialSettings()
+    );
+
+  const [now, setNow] =
+    useState<Date>(() => new Date());
+
+  const [search, setSearch] =
+    useState("");
+
+  const [searchOpen, setSearchOpen] =
+    useState(false);
+
+  const activeChat = useMemo(
+    () =>
+      chats.find(
+        (chat) => chat.id === activeChatId
+      ) || null,
+    [chats, activeChatId]
+  );
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setNow(new Date());
+    }, 1000);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!activeChatId && chats.length > 0) {
+      setActiveChatId(chats[0].id);
+    }
+  }, [activeChatId, chats]);
+
+  function createChat() {
+    const chat = nexusInitialChat();
+
+    setChats((current) => [
+      chat,
+      ...current,
+    ]);
+
+    setActiveChatId(chat.id);
+    setSection("chat");
+    setError("");
+  }
+
+  function selectChat(id: string) {
+    setActiveChatId(id);
+    setSection("chat");
+    setError("");
+  }
+
+  function deleteChat(id: string) {
+    setChats((current) => {
+      const next = current.filter(
+        (chat) => chat.id !== id
+      );
+
+      if (next.length === 0) {
+        const fresh = nexusInitialChat();
+        setActiveChatId(fresh.id);
+        return [fresh];
+      }
+
+      if (id === activeChatId) {
+        setActiveChatId(next[0].id);
+      }
+
+      return next;
+    });
+  }
+
+  function addMessage(
+    chatId: string,
+    role: NexusRole,
+    content: string
+  ) {
+    const message: NexusMessage = {
+      id: nexusId("message"),
+      role,
+      content,
+      createdAt: nexusDate(),
+    };
+
+    setChats((current) =>
+      current.map((chat) => {
+        if (chat.id !== chatId) {
+          return chat;
+        }
+
+        return {
+          ...chat,
+          messages: [
+            ...chat.messages,
+            message,
+          ],
+          updatedAt: nexusDate(),
+        };
+      })
+    );
+  }
+
+  function sendMessage() {
+    const text = input.trim();
+
+    if (!text || thinking) {
+      return;
+    }
+
+    let chatId = activeChatId;
+
+    if (!chatId) {
+      const chat = nexusInitialChat();
+
+      setChats((current) => [
+        chat,
+        ...current,
+      ]);
+
+      chatId = chat.id;
+      setActiveChatId(chat.id);
+    }
+
+    addMessage(
+      chatId,
+      "user",
+      text
+    );
+
+    setInput("");
+    setThinking(true);
+    setError("");
+
+    window.setTimeout(() => {
+      addMessage(
+        chatId!,
+        "assistant",
+        "NEXUS готов. AI-движок и остальные системы будут подключаться следующими модулями."
+      );
+
+      setThinking(false);
+    }, 500);
+  }
+
+  function handleKeyDown(
+    event: React.KeyboardEvent<HTMLTextAreaElement>
+  ) {
+    if (
+      event.key === "Enter" &&
+      !event.shiftKey
+    ) {
+      event.preventDefault();
+      sendMessage();
+    }
+  }
+
+  function navigate(
+    target: NexusSection
+  ) {
+    setSection(target);
+  }
+
+  const navigation = [
+    {
+      id: "chat" as NexusSection,
+      title: "Чаты",
+      icon: "💬",
+    },
+    {
+      id: "memory" as NexusSection,
+      title: "Память",
+      icon: "🧠",
+    },
+    {
+      id: "notes" as NexusSection,
+      title: "Заметки",
+      icon: "📝",
+    },
+    {
+      id: "tasks" as NexusSection,
+      title: "Задачи",
+      icon: "✓",
+    },
+    {
+      id: "calendar" as NexusSection,
+      title: "Календарь",
+      icon: "📅",
+    },
+    {
+      id: "clock" as NexusSection,
+      title: "Часы",
+      icon: "🕐",
+    },
+    {
+      id: "timers" as NexusSection,
+      title: "Таймеры",
+      icon: "⏱",
+    },
+    {
+      id: "files" as NexusSection,
+      title: "Файлы",
+      icon: "📁",
+    },
+    {
+      id: "settings" as NexusSection,
+      title: "Настройки",
+      icon: "⚙",
+    },
+  ];
+
+  function renderSectionTitle() {
+    const item = navigation.find(
+      (nav) => nav.id === section
+    );
+
+    return (
+      <div
+        style={{
+          fontSize: 24,
+          fontWeight: 700,
+        }}
+      >
+        {item?.icon} {item?.title}
+      </div>
+    );
+  }
+
+  function renderChat() {
+    return (
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          height: "100%",
+        }}
+      >
+        <div
+          style={{
+            flex: 1,
+            overflowY: "auto",
+            padding: "24px",
+          }}
+        >
+          {activeChat?.messages.map(
+            (message) => (
+              <div
+                key={message.id}
+                style={{
+                  display: "flex",
+                  justifyContent:
+                    message.role === "user"
+                      ? "flex-end"
+                      : "flex-start",
+                  marginBottom: 16,
+                }}
+              >
+                <div
+                  style={{
+                    maxWidth: "80%",
+                    padding:
+                      "12px 16px",
+                    borderRadius: 16,
+                    background:
+                      message.role ===
+                      "user"
+                        ? "#111827"
+                        : "#f1f3f5",
+                    color:
+                      message.role ===
+                      "user"
+                        ? "#fff"
+                        : "#111",
+                    whiteSpace:
+                      "pre-wrap",
+                    lineHeight: 1.5,
+                  }}
+                >
+                  {message.content}
+                </div>
+              </div>
+            )
+          )}
+
+          {thinking && (
+            <div
+              style={{
+                color: "#777",
+                padding: 12,
+              }}
+            >
+              NEXUS думает...
+            </div>
+          )}
+        </div>
+
+        <div
+          style={{
+            padding: 16,
+            borderTop:
+              "1px solid #e5e7eb",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              gap: 10,
+              maxWidth: 900,
+              margin: "0 auto",
+            }}
+          >
+            <textarea
+              value={input}
+              onChange={(event) =>
+                setInput(
+                  event.target.value
+                )
+              }
+              onKeyDown={handleKeyDown}
+              placeholder="Напишите NEXUS..."
+              rows={1}
+              style={{
+                flex: 1,
+                resize: "none",
+                border:
+                  "1px solid #d1d5db",
+                borderRadius: 14,
+                padding:
+                  "12px 14px",
+                outline: "none",
+                fontSize: 16,
+                minHeight: 46,
+              }}
+            />
+
+            <button
+              onClick={sendMessage}
+              disabled={
+                !input.trim() ||
+                thinking
+              }
+              style={{
+                width: 48,
+                border: "none",
+                borderRadius: 14,
+                background:
+                  input.trim() &&
+                  !thinking
+                    ? "#111827"
+                    : "#d1d5db",
+                color: "#fff",
+                fontSize: 20,
+              }}
+            >
+              ↑
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function renderEmptySection() {
+    return (
+      <div
+        style={{
+          height: "100%",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          textAlign: "center",
+          padding: 30,
+        }}
+      >
+        <div>
+          <div
+            style={{
+              fontSize: 48,
+              marginBottom: 16,
+            }}
+          >
+            NEXUS
+          </div>
+
+          <div
+            style={{
+              fontSize: 18,
+              color: "#666",
+            }}
+          >
+            Этот модуль будет
+            подключён следующими
+            частями.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function renderMain() {
+    if (section === "chat") {
+      return renderChat();
+    }
+
+    return renderEmptySection();
+  }
+
+  return (
+    <main
+      style={{
+        minHeight: "100vh",
+        background: "#fff",
+        color: "#111827",
+        display: "flex",
+        fontFamily:
+          "system-ui, -apple-system, BlinkMacSystemFont, sans-serif",
+      }}
+    >
+      <aside
+        style={{
+          width: sidebarOpen ? 250 : 0,
+          overflow: "hidden",
+          borderRight:
+            sidebarOpen
+              ? "1px solid #e5e7eb"
+              : "none",
+          transition:
+            "width 0.2s ease",
+          flexShrink: 0,
+        }}
+      >
+        <div
+          style={{
+            padding: 18,
+            fontSize: 22,
+            fontWeight: 800,
+            borderBottom:
+              "1px solid #e5e7eb",
+          }}
+        >
+          NEXUS
+        </div>
+
+        <div
+          style={{
+            padding: 12,
+          }}
+        >
+          <button
+            onClick={createChat}
+            style={{
+              width: "100%",
+              padding: 12,
+              border: "none",
+              borderRadius: 12,
+              background: "#111827",
+              color: "#fff",
+              fontSize: 15,
+              marginBottom: 12,
+            }}
+          >
+            ＋ Новый чат
+          </button>
+
+          {navigation.map(
+            (item) => (
+              <button
+                key={item.id}
+                onClick={() =>
+                  navigate(item.id)
+                }
+                style={{
+                  width: "100%",
+                  display: "flex",
+                  alignItems:
+                    "center",
+                  gap: 10,
+                  padding:
+                    "11px 12px",
+                  marginBottom: 4,
+                  border: "none",
+                  borderRadius: 10,
+                  background:
+                    section === item.id
+                      ? "#f1f3f5"
+                      : "transparent",
+                  color: "#111827",
+                  textAlign: "left",
+                  fontSize: 15,
+                }}
+              >
+                <span>
+                  {item.icon}
+                </span>
+
+                <span>
+                  {item.title}
+                </span>
+              </button>
+            )
+          )}
+        </div>
+
+        <div
+          style={{
+            padding: 12,
+            marginTop: 10,
+          }}
+        >
+          <div
+            style={{
+              fontSize: 12,
+              color: "#9ca3af",
+              marginBottom: 8,
+            }}
+          >
+            Последние чаты
+          </div>
+
+          {chats
+            .slice(0, 8)
+            .map((chat) => (
+              <div
+                key={chat.id}
+                style={{
+                  display: "flex",
+                  alignItems:
+                    "center",
+                  gap: 5,
+                  marginBottom: 4,
+                }}
+              >
+                <button
+                  onClick={() =>
+                    selectChat(chat.id)
+                  }
+                  style={{
+                    flex: 1,
+                    overflow: "hidden",
+                    whiteSpace:
+                      "nowrap",
+                    textOverflow:
+                      "ellipsis",
+                    border: "none",
+                    background:
+                      chat.id ===
+                      activeChatId
+                        ? "#f8f8f8"
+                        : "transparent",
+                    borderRadius: 8,
+                    padding:
+                      "8px 10px",
+                    textAlign: "left",
+                  }}
+                >
+                  {chat.title}
+                </button>
+
+                <button
+                  onClick={() =>
+                    deleteChat(
+                      chat.id
+                    )
+                  }
+                  style={{
+                    border: "none",
+                    background:
+                      "transparent",
+                    color: "#999",
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+        </div>
+      </aside>
+
+      <section
+        style={{
+          flex: 1,
+          minWidth: 0,
+          display: "flex",
+          flexDirection: "column",
+          minHeight: "100vh",
+        }}
+      >
+        <header
+          style={{
+            height: 64,
+            display: "flex",
+            alignItems: "center",
+            gap: 14,
+            padding:
+              "0 18px",
+            borderBottom:
+              "1px solid #e5e7eb",
+            flexShrink: 0,
+          }}
+        >
+          <button
+            onClick={() =>
+              setSidebarOpen(
+                (value) => !value
+              )
+            }
+            style={{
+              border: "none",
+              background:
+                "transparent",
+              fontSize: 22,
+            }}
+          >
+            ☰
+          </button>
+
+          <div
+            style={{
+              flex: 1,
+            }}
+          >
+            {renderSectionTitle()}
+          </div>
+
+          <button
+            onClick={() =>
+              setSearchOpen(
+                (value) => !value
+              )
+            }
+            style={{
+              border: "none",
+              background:
+                "transparent",
+              fontSize: 20,
+            }}
+          >
+            🔍
+          </button>
+
+          <div
+            style={{
+              fontSize: 14,
+              color: "#6b7280",
+            }}
+          >
+            {nexusTime(now)}
+          </div>
+        </header>
+
+        {searchOpen && (
+          <div
+            style={{
+              padding: 10,
+              borderBottom:
+                "1px solid #e5e7eb",
+            }}
+          >
+            <input
+              value={search}
+              onChange={(event) =>
+                setSearch(
+                  event.target.value
+                )
+              }
+              placeholder="Поиск в NEXUS..."
+              style={{
+                width: "100%",
+                padding: 11,
+                border:
+                  "1px solid #d1d5db",
+                borderRadius: 10,
+                outline: "none",
+              }}
+            />
+          </div>
+        )}
+
+        <div
+          style={{
+            flex: 1,
+            minHeight: 0,
+          }}
+        >
+          {error && (
+            <div
+              style={{
+                margin: 12,
+                padding: 12,
+                borderRadius: 10,
+                background: "#fee2e2",
+                color: "#991b1b",
+              }}
+            >
+              {error}
+            </div>
+          )}
+
+          {renderMain()}
+        </div>
+      </section>
+    </main>
+  );
+}
+
+registerNexusModule({
+  id: "core",
+  title: "NEXUS Core",
+  description:
+    "Основное ядро NEXUS",
+  icon: "◈",
+  section: "chat",
+  order: 0,
+});
+
+export default NexusApp;
+/* =========================================================
+   NEXUS — PART 2
+   DATA ENGINE / APPLICATION STATE
+   Вставь полностью в конец PART 1
+   ========================================================= */
+
+type NexusDataSnapshot = {
+  version: number;
+  savedAt: string;
+  chats: NexusChat[];
+  memory: NexusMemoryItem[];
+  notes: NexusNote[];
+  tasks: NexusTask[];
+  events: NexusCalendarEvent[];
+  timers: NexusTimer[];
+  files: NexusFile[];
+  settings: NexusSettings;
+};
+
+type NexusDataAction =
+  | "create"
+  | "update"
+  | "delete"
+  | "complete"
+  | "restore"
+  | "clear";
+
+type NexusDataEvent = {
+  id: string;
+  action: NexusDataAction;
+  entity: string;
+  entityId: string | null;
+  timestamp: string;
+};
+
+const NEXUS_DATA_VERSION = 1;
+
+const NEXUS_DATA_LIMITS = {
+  chats: 100,
+  messagesPerChat: 500,
+  memory: 500,
+  notes: 500,
+  tasks: 1000,
+  events: 1000,
+  timers: 100,
+  files: 2000,
+};
+
+function nexusClone<T>(value: T): T {
+  return JSON.parse(
+    JSON.stringify(value)
+  ) as T;
+}
+
+function nexusCreateEmptySnapshot(): NexusDataSnapshot {
+  return {
+    version: NEXUS_DATA_VERSION,
+    savedAt: nexusDate(),
+    chats: [],
+    memory: [],
+    notes: [],
+    tasks: [],
+    events: [],
+    timers: [],
+    files: [],
+    settings:
+      nexusInitialSettings(),
+  };
+}
+
+function nexusNormalizeSnapshot(
+  data: Partial<NexusDataSnapshot>
+): NexusDataSnapshot {
+  const empty =
+    nexusCreateEmptySnapshot();
+
+  return {
+    version:
+      typeof data.version ===
+      "number"
+        ? data.version
+        : empty.version,
+
+    savedAt:
+      typeof data.savedAt ===
+      "string"
+        ? data.savedAt
+        : empty.savedAt,
+
+    chats: Array.isArray(
+      data.chats
+    )
+      ? data.chats
+      : [],
+
+    memory: Array.isArray(
+      data.memory
+    )
+      ? data.memory
+      : [],
+
+    notes: Array.isArray(
+      data.notes
+    )
+      ? data.notes
+      : [],
+
+    tasks: Array.isArray(
+      data.tasks
+    )
+      ? data.tasks
+      : [],
+
+    events: Array.isArray(
+      data.events
+    )
+      ? data.events
+      : [],
+
+    timers: Array.isArray(
+      data.timers
+    )
+      ? data.timers
+      : [],
+
+    files: Array.isArray(
+      data.files
+    )
+      ? data.files
+      : [],
+
+    settings: {
+      ...empty.settings,
+      ...(data.settings || {}),
+    },
+  };
+}
+
+function nexusLimitArray<T>(
+  items: T[],
+  limit: number
+): T[] {
+  if (items.length <= limit) {
+    return items;
+  }
+
+  return items.slice(
+    items.length - limit
+  );
+}
+
+function nexusBuildSnapshot(
+  data: Partial<NexusDataSnapshot>
+): NexusDataSnapshot {
+  const normalized =
+    nexusNormalizeSnapshot(
+      data
+    );
+
+  normalized.chats =
+    nexusLimitArray(
+      normalized.chats,
+      NEXUS_DATA_LIMITS.chats
+    );
+
+  normalized.chats =
+    normalized.chats.map(
+      (chat) => ({
+        ...chat,
+        messages:
+          nexusLimitArray(
+            chat.messages || [],
+            NEXUS_DATA_LIMITS
+              .messagesPerChat
+          ),
+      })
+    );
+
+  normalized.memory =
+    nexusLimitArray(
+      normalized.memory,
+      NEXUS_DATA_LIMITS.memory
+    );
+
+  normalized.notes =
+    nexusLimitArray(
+      normalized.notes,
+      NEXUS_DATA_LIMITS.notes
+    );
+
+  normalized.tasks =
+    nexusLimitArray(
+      normalized.tasks,
+      NEXUS_DATA_LIMITS.tasks
+    );
+
+  normalized.events =
+    nexusLimitArray(
+      normalized.events,
+      NEXUS_DATA_LIMITS.events
+    );
+
+  normalized.timers =
+    nexusLimitArray(
+      normalized.timers,
+      NEXUS_DATA_LIMITS.timers
+    );
+
+  normalized.files =
+    nexusLimitArray(
+      normalized.files,
+      NEXUS_DATA_LIMITS.files
+    );
+
+  normalized.savedAt =
+    nexusDate();
+
+  return normalized;
+}
+
+function nexusSerializeSnapshot(
+  snapshot: NexusDataSnapshot
+): string {
+  return JSON.stringify(
+    snapshot
+  );
+}
+
+function nexusDeserializeSnapshot(
+  raw: string
+): NexusDataSnapshot | null {
+  try {
+    const parsed =
+      JSON.parse(raw);
+
+    if (
+      !parsed ||
+      typeof parsed !==
+        "object"
+    ) {
+      return null;
+    }
+
+    return nexusBuildSnapshot(
+      parsed
+    );
+  } catch {
+    return null;
+  }
+}
+
+function nexusSaveSnapshot(
+  snapshot: NexusDataSnapshot
+): boolean {
+  try {
+    if (
+      typeof window ===
+      "undefined"
+    ) {
+      return false;
+    }
+
+    const prepared =
+      nexusBuildSnapshot(
+        snapshot
+      );
+
+    window.localStorage.setItem(
+      NEXUS_STORAGE_KEY,
+      nexusSerializeSnapshot(
+        prepared
+      )
+    );
+
+    return true;
+  } catch (error) {
+    console.error(
+      "NEXUS storage save error:",
+      error
+    );
+
+    return false;
+  }
+}
+
+function nexusLoadSnapshot():
+  | NexusDataSnapshot
+  | null {
+  try {
+    if (
+      typeof window ===
+      "undefined"
+    ) {
+      return null;
+    }
+
+    const raw =
+      window.localStorage.getItem(
+        NEXUS_STORAGE_KEY
+      );
+
+    if (!raw) {
+      return null;
+    }
+
+    return nexusDeserializeSnapshot(
+      raw
+    );
+  } catch (error) {
+    console.error(
+      "NEXUS storage load error:",
+      error
+    );
+
+    return null;
+  }
+}
+
+function nexusDeleteSnapshot(): boolean {
+  try {
+    if (
+      typeof window ===
+      "undefined"
+    ) {
+      return false;
+    }
+
+    window.localStorage.removeItem(
+      NEXUS_STORAGE_KEY
+    );
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function nexusExportSnapshot(
+  snapshot: NexusDataSnapshot
+): string {
+  return JSON.stringify(
+    nexusBuildSnapshot(
+      snapshot
+    ),
+    null,
+    2
+  );
+}
+
+function nexusCreateDataEvent(
+  action: NexusDataAction,
+  entity: string,
+  entityId: string | null = null
+): NexusDataEvent {
+  return {
+    id: nexusId("data_event"),
+    action,
+    entity,
+    entityId,
+    timestamp:
+      nexusDate(),
+  };
+}
+
+function nexusSearchText(
+  value: unknown
+): string {
+  if (
+    typeof value !==
+    "string"
+  ) {
+    return "";
+  }
+
+  return value
+    .trim()
+    .toLowerCase();
+}
+
+function nexusContains(
+  source: unknown,
+  query: string
+): boolean {
+  const normalizedQuery =
+    nexusSearchText(
+      query
+    );
+
+  if (!normalizedQuery) {
+    return true;
+  }
+
+  return nexusSearchText(
+    source
+  ).includes(
+    normalizedQuery
+  );
+}
+
+function nexusSearchChats(
+  chats: NexusChat[],
+  query: string
+): NexusChat[] {
+  return chats.filter(
+    (chat) =>
+      nexusContains(
+        chat.title,
+        query
+      ) ||
+      chat.messages.some(
+        (message) =>
+          nexusContains(
+            message.content,
+            query
+          )
+      )
+  );
+}
+
+function nexusSearchMemory(
+  memory: NexusMemoryItem[],
+  query: string
+): NexusMemoryItem[] {
+  return memory.filter(
+    (item) =>
+      nexusContains(
+        item.text,
+        query
+      ) ||
+      nexusContains(
+        item.category,
+        query
+      )
+  );
+}
+
+function nexusSearchNotes(
+  notes: NexusNote[],
+  query: string
+): NexusNote[] {
+  return notes.filter(
+    (note) =>
+      nexusContains(
+        note.title,
+        query
+      ) ||
+      nexusContains(
+        note.content,
+        query
+      )
+  );
+}
+
+function nexusSearchTasks(
+  tasks: NexusTask[],
+  query: string
+): NexusTask[] {
+  return tasks.filter(
+    (task) =>
+      nexusContains(
+        task.title,
+        query
+      ) ||
+      nexusContains(
+        task.description,
+        query
+      ) ||
+      nexusContains(
+        task.dueDate,
+        query
+      )
+  );
+}
+
+function nexusSearchEvents(
+  events: NexusCalendarEvent[],
+  query: string
+): NexusCalendarEvent[] {
+  return events.filter(
+    (event) =>
+      nexusContains(
+        event.title,
+        query
+      ) ||
+      nexusContains(
+        event.description,
+        query
+      ) ||
+      nexusContains(
+        event.date,
+        query
+      )
+  );
+}
+
+function nexusSearchFiles(
+  files: NexusFile[],
+  query: string
+): NexusFile[] {
+  return files.filter(
+    (file) =>
+      nexusContains(
+        file.name,
+        query
+      ) ||
+      nexusContains(
+        file.content,
+        query
+      )
+  );
+}
+
+type NexusGlobalSearchResult = {
+  chats: NexusChat[];
+  memory: NexusMemoryItem[];
+  notes: NexusNote[];
+  tasks: NexusTask[];
+  events: NexusCalendarEvent[];
+  files: NexusFile[];
+};
+
+function nexusGlobalSearch(
+  snapshot: NexusDataSnapshot,
+  query: string
+): NexusGlobalSearchResult {
+  return {
+    chats:
+      nexusSearchChats(
+        snapshot.chats,
+        query
+      ),
+
+    memory:
+      nexusSearchMemory(
+        snapshot.memory,
+        query
+      ),
+
+    notes:
+      nexusSearchNotes(
+        snapshot.notes,
+        query
+      ),
+
+    tasks:
+      nexusSearchTasks(
+        snapshot.tasks,
+        query
+      ),
+
+    events:
+      nexusSearchEvents(
+        snapshot.events,
+        query
+      ),
+
+    files:
+      nexusSearchFiles(
+        snapshot.files,
+        query
+      ),
+  };
+}
+
+function nexusCountSnapshotItems(
+  snapshot: NexusDataSnapshot
+) {
+  return {
+    chats:
+      snapshot.chats.length,
+
+    messages:
+      snapshot.chats.reduce(
+        (
+          total,
+          chat
+        ) =>
+          total +
+          chat.messages.length,
+        0
+      ),
+
+    memory:
+      snapshot.memory.length,
+
+    notes:
+      snapshot.notes.length,
+
+    tasks:
+      snapshot.tasks.length,
+
+    events:
+      snapshot.events.length,
+
+    timers:
+      snapshot.timers.length,
+
+    files:
+      snapshot.files.length,
+  };
+}
+
+function nexusHasData(
+  snapshot: NexusDataSnapshot
+): boolean {
+  const counts =
+    nexusCountSnapshotItems(
+      snapshot
+    );
+
+  return Object.values(
+    counts
+  ).some(
+    (value) => value > 0
+  );
+}
+
+function nexusGetPendingTasks(
+  tasks: NexusTask[]
+): NexusTask[] {
+  return tasks.filter(
+    (task) =>
+      !task.completed
+  );
+}
+
+function nexusGetCompletedTasks(
+  tasks: NexusTask[]
+): NexusTask[] {
+  return tasks.filter(
+    (task) =>
+      task.completed
+  );
+}
+
+function nexusGetEventsForDate(
+  events: NexusCalendarEvent[],
+  date: string
+): NexusCalendarEvent[] {
+  return events
+    .filter(
+      (event) =>
+        event.date === date
+    )
+    .sort(
+      (a, b) =>
+        a.time.localeCompare(
+          b.time
+        )
+    );
+}
+
+function nexusGetFilesInFolder(
+  files: NexusFile[],
+  parentId: string | null
+): NexusFile[] {
+  return files.filter(
+    (file) =>
+      file.parentId ===
+      parentId
+  );
+}
+
+function nexusGetRunningTimers(
+  timers: NexusTimer[]
+): NexusTimer[] {
+  return timers.filter(
+    (timer) =>
+      timer.running &&
+      timer.remaining > 0
+  );
+}
+
+const NEXUS_DATA_ENGINE = {
+  version:
+    NEXUS_DATA_VERSION,
+
+  storageKey:
+    NEXUS_STORAGE_KEY,
+
+  createSnapshot:
+    nexusBuildSnapshot,
+
+  save:
+    nexusSaveSnapshot,
+
+  load:
+    nexusLoadSnapshot,
+
+  remove:
+    nexusDeleteSnapshot,
+
+  export:
+    nexusExportSnapshot,
+
+  search:
+    nexusGlobalSearch,
+
+  count:
+    nexusCountSnapshotItems,
+
+  hasData:
+    nexusHasData,
+
+  createEvent:
+    nexusCreateDataEvent,
+
+  pendingTasks:
+    nexusGetPendingTasks,
+
+  completedTasks:
+    nexusGetCompletedTasks,
+
+  eventsForDate:
+    nexusGetEventsForDate,
+
+  filesInFolder:
+    nexusGetFilesInFolder,
+
+  runningTimers:
+    nexusGetRunningTimers,
+};
+
+const NEXUS_ENGINE_STATUS = {
+  core: true,
+  dataEngine: true,
+  localStorage: true,
+  globalSearch: true,
+  export: true,
+  import: true,
+  version:
+    NEXUS_DATA_VERSION,
+};
+
+registerNexusModule({
+  id: "data-engine",
+  title: "Data Engine",
+  description:
+    "Единое хранилище и поиск данных NEXUS",
+  icon: "◉",
+  section: "settings",
+  order: 1,
+});
+/* =========================================================
+   NEXUS — PART 3
+   CHAT ENGINE / CONVERSATION MANAGEMENT
+   Вставь полностью в конец PART 2
+   ========================================================= */
+
+type NexusChatOperation =
+  | "create"
+  | "rename"
+  | "delete"
+  | "clear"
+  | "duplicate";
+
+type NexusChatEvent = {
+  id: string;
+  operation: NexusChatOperation;
+  chatId: string;
+  timestamp: string;
+};
+
+type NexusConversationStats = {
+  messages: number;
+  userMessages: number;
+  assistantMessages: number;
+  characters: number;
+  createdAt: string | null;
+  updatedAt: string | null;
+};
+
+type NexusMessageSearchResult = {
+  chatId: string;
+  chatTitle: string;
+  message: NexusMessage;
+};
+
+function nexusCreateChat(
+  title = "Новый чат"
+): NexusChat {
+  const timestamp = nexusDate();
+
+  return {
+    id: nexusId("chat"),
+    title:
+      title.trim() || "Новый чат",
+    messages: [],
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+}
+
+function nexusCreateMessage(
+  role: NexusRole,
+  content: string
+): NexusMessage {
+  return {
+    id: nexusId("message"),
+    role,
+    content: content.trim(),
+    createdAt: nexusDate(),
+  };
+}
+
+function nexusGenerateChatTitle(
+  text: string
+): string {
+  const clean =
+    text.trim().replace(
+      /\s+/g,
+      " "
+    );
+
+  if (!clean) {
+    return "Новый чат";
+  }
+
+  const words =
+    clean.split(" ");
+
+  const title =
+    words
+      .slice(0, 7)
+      .join(" ");
+
+  return title.length > 45
+    ? `${title.slice(0, 45)}…`
+    : title;
+}
+
+function nexusAddMessageToChat(
+  chats: NexusChat[],
+  chatId: string,
+  message: NexusMessage
+): NexusChat[] {
+  return chats.map(
+    (chat) => {
+      if (chat.id !== chatId) {
+        return chat;
+      }
+
+      const messages = [
+        ...chat.messages,
+        message,
+      ];
+
+      return {
+        ...chat,
+        messages:
+          nexusLimitArray(
+            messages,
+            NEXUS_DATA_LIMITS
+              .messagesPerChat
+          ),
+        updatedAt:
+          message.createdAt,
+      };
+    }
+  );
+}
+
+function nexusRenameChat(
+  chats: NexusChat[],
+  chatId: string,
+  title: string
+): NexusChat[] {
+  const clean =
+    title.trim();
+
+  if (!clean) {
+    return chats;
+  }
+
+  return chats.map(
+    (chat) =>
+      chat.id === chatId
+        ? {
+            ...chat,
+            title:
+              clean.slice(
+                0,
+                80
+              ),
+            updatedAt:
+              nexusDate(),
+          }
+        : chat
+  );
+}
+
+function nexusDeleteChat(
+  chats: NexusChat[],
+  chatId: string
+): NexusChat[] {
+  return chats.filter(
+    (chat) =>
+      chat.id !== chatId
+  );
+}
+
+function nexusClearChat(
+  chats: NexusChat[],
+  chatId: string
+): NexusChat[] {
+  return chats.map(
+    (chat) =>
+      chat.id === chatId
+        ? {
+            ...chat,
+            messages: [],
+            updatedAt:
+              nexusDate(),
+          }
+        : chat
+  );
+}
+
+function nexusDuplicateChat(
+  chats: NexusChat[],
+  chatId: string
+): NexusChat[] {
+  const source =
+    chats.find(
+      (chat) =>
+        chat.id === chatId
+    );
+
+  if (!source) {
+    return chats;
+  }
+
+  const copy: NexusChat = {
+    ...nexusClone(source),
+    id: nexusId("chat"),
+    title:
+      `${source.title} (копия)`,
+    createdAt:
+      nexusDate(),
+    updatedAt:
+      nexusDate(),
+    messages:
+      source.messages.map(
+        (message) => ({
+          ...message,
+          id: nexusId(
+            "message"
+          ),
+        })
+      ),
+  };
+
+  return [
+    copy,
+    ...chats,
+  ];
+}
+
+function nexusGetChatById(
+  chats: NexusChat[],
+  chatId: string
+): NexusChat | null {
+  return (
+    chats.find(
+      (chat) =>
+        chat.id === chatId
+    ) || null
+  );
+}
+
+function nexusGetLastMessage(
+  chat: NexusChat
+): NexusMessage | null {
+  if (
+    chat.messages.length ===
+    0
+  ) {
+    return null;
+  }
+
+  return (
+    chat.messages[
+      chat.messages.length - 1
+    ] || null
+  );
+}
+
+function nexusGetLastUserMessage(
+  chat: NexusChat
+): NexusMessage | null {
+  for (
+    let index =
+      chat.messages.length - 1;
+    index >= 0;
+    index--
+  ) {
+    if (
+      chat.messages[index]
+        .role === "user"
+    ) {
+      return chat.messages[index];
+    }
+  }
+
+  return null;
+}
+
+function nexusGetLastAssistantMessage(
+  chat: NexusChat
+): NexusMessage | null {
+  for (
+    let index =
+      chat.messages.length - 1;
+    index >= 0;
+    index--
+  ) {
+    if (
+      chat.messages[index]
+        .role === "assistant"
+    ) {
+      return chat.messages[index];
+    }
+  }
+
+  return null;
+}
+
+function nexusGetConversationStats(
+  chat: NexusChat | null
+): NexusConversationStats {
+  if (!chat) {
+    return {
+      messages: 0,
+      userMessages: 0,
+      assistantMessages: 0,
+      characters: 0,
+      createdAt: null,
+      updatedAt: null,
+    };
+  }
+
+  let userMessages = 0;
+  let assistantMessages = 0;
+  let characters = 0;
+
+  for (const message of chat.messages) {
+    characters +=
+      message.content.length;
+
+    if (
+      message.role === "user"
+    ) {
+      userMessages++;
+    } else {
+      assistantMessages++;
+    }
+  }
+
+  return {
+    messages:
+      chat.messages.length,
+    userMessages,
+    assistantMessages,
+    characters,
+    createdAt:
+      chat.createdAt,
+    updatedAt:
+      chat.updatedAt,
+  };
+}
+
+function nexusSearchMessages(
+  chats: NexusChat[],
+  query: string
+): NexusMessageSearchResult[] {
+  const cleanQuery =
+    nexusSearchText(query);
+
+  if (!cleanQuery) {
+    return [];
+  }
+
+  const results:
+    NexusMessageSearchResult[] =
+    [];
+
+  for (const chat of chats) {
+    for (const message of chat.messages) {
+      if (
+        nexusContains(
+          message.content,
+          cleanQuery
+        )
+      ) {
+        results.push({
+          chatId: chat.id,
+          chatTitle: chat.title,
+          message,
+        });
+      }
+    }
+  }
+
+  return results;
+}
+
+function nexusGetRecentMessages(
+  chat: NexusChat | null,
+  limit = 20
+): NexusMessage[] {
+  if (!chat) {
+    return [];
+  }
+
+  const safeLimit =
+    Math.max(
+      1,
+      Math.min(
+        limit,
+        NEXUS_DATA_LIMITS
+          .messagesPerChat
+      )
+    );
+
+  return chat.messages.slice(
+    -safeLimit
+  );
+}
+
+function nexusFormatMessagesForAI(
+  messages: NexusMessage[]
+): string {
+  return messages
+    .map(
+      (message) =>
+        `${message.role}: ${message.content}`
+    )
+    .join("\n");
+}
+
+function nexusBuildConversationContext(
+  chat: NexusChat | null,
+  limit = 20
+): {
+  chatId: string | null;
+  title: string;
+  messages: NexusMessage[];
+  text: string;
+} {
+  const messages =
+    nexusGetRecentMessages(
+      chat,
+      limit
+    );
+
+  return {
+    chatId:
+      chat?.id || null,
+    title:
+      chat?.title ||
+      "Новый чат",
+    messages,
+    text:
+      nexusFormatMessagesForAI(
+        messages
+      ),
+  };
+}
+
+function nexusShouldGenerateTitle(
+  chat: NexusChat
+): boolean {
+  return (
+    chat.title ===
+      "Новый чат" &&
+    chat.messages.filter(
+      (message) =>
+        message.role === "user"
+    ).length === 1
+  );
+}
+
+function nexusPrepareUserMessage(
+  content: string
+): NexusMessage | null {
+  const clean =
+    content.trim();
+
+  if (!clean) {
+    return null;
+  }
+
+  return nexusCreateMessage(
+    "user",
+    clean
+  );
+}
+
+function nexusPrepareAssistantMessage(
+  content: string
+): NexusMessage | null {
+  const clean =
+    content.trim();
+
+  if (!clean) {
+    return null;
+  }
+
+  return nexusCreateMessage(
+    "assistant",
+    clean
+  );
+}
+
+function nexusAddUserMessage(
+  chats: NexusChat[],
+  chatId: string,
+  content: string
+): NexusChat[] {
+  const message =
+    nexusPrepareUserMessage(
+      content
+    );
+
+  if (!message) {
+    return chats;
+  }
+
+  const updated =
+    nexusAddMessageToChat(
+      chats,
+      chatId,
+      message
+    );
+
+  return updated.map(
+    (chat) => {
+      if (
+        chat.id === chatId &&
+        nexusShouldGenerateTitle(
+          chat
+        )
+      ) {
+        return {
+          ...chat,
+          title:
+            nexusGenerateChatTitle(
+              content
+            ),
+        };
+      }
+
+      return chat;
+    }
+  );
+}
+
+function nexusAddAssistantMessage(
+  chats: NexusChat[],
+  chatId: string,
+  content: string
+): NexusChat[] {
+  const message =
+    nexusPrepareAssistantMessage(
+      content
+    );
+
+  if (!message) {
+    return chats;
+  }
+
+  return nexusAddMessageToChat(
+    chats,
+    chatId,
+    message
+  );
+}
+
+function nexusCreateChatWithMessage(
+  content: string
+): NexusChat {
+  const chat =
+    nexusCreateChat(
+      nexusGenerateChatTitle(
+        content
+      )
+    );
+
+  const message =
+    nexusPrepareUserMessage(
+      content
+    );
+
+  if (!message) {
+    return chat;
+  }
+
+  return {
+    ...chat,
+    messages: [message],
+    updatedAt:
+      message.createdAt,
+  };
+}
+
+function nexusSortChats(
+  chats: NexusChat[]
+): NexusChat[] {
+  return [...chats].sort(
+    (a, b) =>
+      new Date(
+        b.updatedAt
+      ).getTime() -
+      new Date(
+        a.updatedAt
+      ).getTime()
+  );
+}
+
+function nexusGetChatPreview(
+  chat: NexusChat
+): string {
+  const message =
+    nexusGetLastMessage(
+      chat
+    );
+
+  if (!message) {
+    return "Пустой чат";
+  }
+
+  const text =
+    message.content
+      .replace(
+        /\s+/g,
+        " "
+      )
+      .trim();
+
+  if (text.length <= 90) {
+    return text;
+  }
+
+  return `${text.slice(
+    0,
+    90
+  )}…`;
+}
+
+function nexusCreateChatEvent(
+  operation: NexusChatOperation,
+  chatId: string
+): NexusChatEvent {
+  return {
+    id: nexusId(
+      "chat_event"
+    ),
+    operation,
+    chatId,
+    timestamp:
+      nexusDate(),
+  };
+}
+
+function nexusBuildChatSnapshot(
+  chats: NexusChat[]
+) {
+  return chats.map(
+    (chat) => ({
+      id: chat.id,
+      title: chat.title,
+      messages:
+        chat.messages.length,
+      preview:
+        nexusGetChatPreview(
+          chat
+        ),
+      createdAt:
+        chat.createdAt,
+      updatedAt:
+        chat.updatedAt,
+    })
+  );
+}
+
+function nexusGetChatCount(
+  chats: NexusChat[]
+): number {
+  return chats.length;
+}
+
+function nexusGetMessageCount(
+  chats: NexusChat[]
+): number {
+  return chats.reduce(
+    (total, chat) =>
+      total +
+      chat.messages.length,
+    0
+  );
+}
+
+function nexusGetUserMessageCount(
+  chats: NexusChat[]
+): number {
+  return chats.reduce(
+    (total, chat) =>
+      total +
+      chat.messages.filter(
+        (message) =>
+          message.role ===
+          "user"
+      ).length,
+    0
+  );
+}
+
+function nexusGetAssistantMessageCount(
+  chats: NexusChat[]
+): number {
+  return chats.reduce(
+    (total, chat) =>
+      total +
+      chat.messages.filter(
+        (message) =>
+          message.role ===
+          "assistant"
+      ).length,
+    0
+  );
+}
+
+function nexusGetChatEngineStats(
+  chats: NexusChat[]
+) {
+  return {
+    chats:
+      nexusGetChatCount(
+        chats
+      ),
+    messages:
+      nexusGetMessageCount(
+        chats
+      ),
+    userMessages:
+      nexusGetUserMessageCount(
+        chats
+      ),
+    assistantMessages:
+      nexusGetAssistantMessageCount(
+        chats
+      ),
+  };
+}
+
+const NEXUS_CHAT_ENGINE = {
+  create:
+    nexusCreateChat,
+
+  createWithMessage:
+    nexusCreateChatWithMessage,
+
+  createMessage:
+    nexusCreateMessage,
+
+  addMessage:
+    nexusAddMessageToChat,
+
+  addUserMessage:
+    nexusAddUserMessage,
+
+  addAssistantMessage:
+    nexusAddAssistantMessage,
+
+  rename:
+    nexusRenameChat,
+
+  delete:
+    nexusDeleteChat,
+
+  clear:
+    nexusClearChat,
+
+  duplicate:
+    nexusDuplicateChat,
+
+  get:
+    nexusGetChatById,
+
+  lastMessage:
+    nexusGetLastMessage,
+
+  lastUserMessage:
+    nexusGetLastUserMessage,
+
+  lastAssistantMessage:
+    nexusGetLastAssistantMessage,
+
+  recentMessages:
+    nexusGetRecentMessages,
+
+  conversationContext:
+    nexusBuildConversationContext,
+
+  searchMessages:
+    nexusSearchMessages,
+
+  preview:
+    nexusGetChatPreview,
+
+  sort:
+    nexusSortChats,
+
+  stats:
+    nexusGetChatEngineStats,
+
+  snapshot:
+    nexusBuildChatSnapshot,
+
+  event:
+    nexusCreateChatEvent,
+};
+
+registerNexusModule({
+  id: "chat-engine",
+  title: "Chat Engine",
+  description:
+    "Управление чатами, сообщениями и контекстом разговоров",
+  icon: "💬",
+  section: "chat",
+  order: 2,
+});
+/* =========================================================
+   NEXUS — PART 4
+   MEMORY ENGINE
+   Вставь полностью в конец PART 3
+   ========================================================= */
+
+type NexusMemoryOperation =
+  | "add"
+  | "update"
+  | "delete"
+  | "clear";
+
+type NexusMemoryEvent = {
+  id: string;
+  operation: NexusMemoryOperation;
+  memoryId: string | null;
+  timestamp: string;
+};
+
+type NexusMemoryStats = {
+  total: number;
+  facts: number;
+  preferences: number;
+  goals: number;
+  projects: number;
+  important: number;
+};
+
+type NexusMemorySearchResult = {
+  item: NexusMemoryItem;
+  score: number;
+};
+
+function nexusCreateMemory(
+  text: string,
+  category: NexusMemoryCategory = "fact"
+): NexusMemoryItem {
+  const timestamp = nexusDate();
+
+  return {
+    id: nexusId("memory"),
+    text: text.trim(),
+    category,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+}
+
+function nexusNormalizeMemoryText(
+  text: string
+): string {
+  return text
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function nexusMemoryKey(
+  text: string
+): string {
+  return nexusNormalizeMemoryText(
+    text
+  ).toLowerCase();
+}
+
+function nexusMemoryExists(
+  memory: NexusMemoryItem[],
+  text: string
+): boolean {
+  const key =
+    nexusMemoryKey(text);
+
+  return memory.some(
+    (item) =>
+      nexusMemoryKey(
+        item.text
+      ) === key
+  );
+}
+
+function nexusAddMemory(
+  memory: NexusMemoryItem[],
+  text: string,
+  category: NexusMemoryCategory = "fact"
+): NexusMemoryItem[] {
+  const clean =
+    nexusNormalizeMemoryText(
+      text
+    );
+
+  if (!clean) {
+    return memory;
+  }
+
+  if (
+    nexusMemoryExists(
+      memory,
+      clean
+    )
+  ) {
+    return memory;
+  }
+
+  const item =
+    nexusCreateMemory(
+      clean,
+      category
+    );
+
+  return [
+    ...memory,
+    item,
+  ].slice(
+    -NEXUS_DATA_LIMITS.memory
+  );
+}
+
+function nexusUpdateMemory(
+  memory: NexusMemoryItem[],
+  memoryId: string,
+  text: string,
+  category?: NexusMemoryCategory
+): NexusMemoryItem[] {
+  const clean =
+    nexusNormalizeMemoryText(
+      text
+    );
+
+  if (!clean) {
+    return memory;
+  }
+
+  return memory.map(
+    (item) =>
+      item.id === memoryId
+        ? {
+            ...item,
+            text: clean,
+            category:
+              category ||
+              item.category,
+            updatedAt:
+              nexusDate(),
+          }
+        : item
+  );
+}
+
+function nexusDeleteMemory(
+  memory: NexusMemoryItem[],
+  memoryId: string
+): NexusMemoryItem[] {
+  return memory.filter(
+    (item) =>
+      item.id !== memoryId
+  );
+}
+
+function nexusClearMemory(
+  memory: NexusMemoryItem[]
+): NexusMemoryItem[] {
+  return memory.length === 0
+    ? memory
+    : [];
+}
+
+function nexusGetMemory(
+  memory: NexusMemoryItem[],
+  memoryId: string
+): NexusMemoryItem | null {
+  return (
+    memory.find(
+      (item) =>
+        item.id === memoryId
+    ) || null
+  );
+}
+
+function nexusGetMemoriesByCategory(
+  memory: NexusMemoryItem[],
+  category: NexusMemoryCategory
+): NexusMemoryItem[] {
+  return memory.filter(
+    (item) =>
+      item.category ===
+      category
+  );
+}
+
+function nexusCalculateMemoryScore(
+  item: NexusMemoryItem,
+  queryWords: string[]
+): number {
+  const text =
+    nexusMemoryKey(
+      item.text
+    );
+
+  if (!text) {
+    return 0;
+  }
+
+  let score = 0;
+
+  for (const word of queryWords) {
+    if (!word) {
+      continue;
+    }
+
+    if (text === word) {
+      score += 10;
+      continue;
+    }
+
+    if (
+      text.includes(word)
+    ) {
+      score += 3;
+    }
+  }
+
+  if (
+    queryWords.length > 0 &&
+    queryWords.every(
+      (word) =>
+        text.includes(word)
+    )
+  ) {
+    score += 5;
+  }
+
+  return score;
+}
+
+function nexusSearchMemorySmart(
+  memory: NexusMemoryItem[],
+  query: string
+): NexusMemorySearchResult[] {
+  const normalized =
+    nexusMemoryKey(query);
+
+  if (!normalized) {
+    return [];
+  }
+
+  const words =
+    normalized
+      .split(" ")
+      .filter(
+        (word) =>
+          word.length >= 2
+      );
+
+  return memory
+    .map((item) => ({
+      item,
+      score:
+        nexusCalculateMemoryScore(
+          item,
+          words
+        ),
+    }))
+    .filter(
+      (result) =>
+        result.score > 0
+    )
+    .sort(
+      (a, b) =>
+        b.score - a.score
+    );
+}
+
+function nexusGetImportantMemories(
+  memory: NexusMemoryItem[]
+): NexusMemoryItem[] {
+  return memory.filter(
+    (item) =>
+      item.category ===
+        "important" ||
+      item.category ===
+        "goal" ||
+      item.category ===
+        "project"
+  );
+}
+
+function nexusGetRecentMemories(
+  memory: NexusMemoryItem[],
+  limit = 20
+): NexusMemoryItem[] {
+  return [...memory]
+    .sort(
+      (a, b) =>
+        new Date(
+          b.updatedAt
+        ).getTime() -
+        new Date(
+          a.updatedAt
+        ).getTime()
+    )
+    .slice(
+      0,
+      Math.max(
+        1,
+        limit
+      )
+    );
+}
+
+function nexusMemoryCategoryLabel(
+  category: NexusMemoryCategory
+): string {
+  switch (category) {
+    case "fact":
+      return "Факт";
+
+    case "preference":
+      return "Предпочтение";
+
+    case "goal":
+      return "Цель";
+
+    case "project":
+      return "Проект";
+
+    case "important":
+      return "Важное";
+
+    default:
+      return "Информация";
+  }
+}
+
+function nexusGetMemoryStats(
+  memory: NexusMemoryItem[]
+): NexusMemoryStats {
+  return {
+    total:
+      memory.length,
+
+    facts:
+      memory.filter(
+        (item) =>
+          item.category ===
+          "fact"
+      ).length,
+
+    preferences:
+      memory.filter(
+        (item) =>
+          item.category ===
+          "preference"
+      ).length,
+
+    goals:
+      memory.filter(
+        (item) =>
+          item.category ===
+          "goal"
+      ).length,
+
+    projects:
+      memory.filter(
+        (item) =>
+          item.category ===
+          "project"
+      ).length,
+
+    important:
+      memory.filter(
+        (item) =>
+          item.category ===
+          "important"
+      ).length,
+  };
+}
+
+function nexusFormatMemoryForAI(
+  memory: NexusMemoryItem[],
+  limit = 30
+): string {
+  const items =
+    nexusGetRecentMemories(
+      memory,
+      limit
+    );
+
+  if (items.length === 0) {
+    return "Память NEXUS пока пуста.";
+  }
+
+  return items
+    .map(
+      (item) =>
+        `[${nexusMemoryCategoryLabel(
+          item.category
+        )}] ${item.text}`
+    )
+    .join("\n");
+}
+
+function nexusDetectMemoryCategory(
+  text: string
+): NexusMemoryCategory {
+  const value =
+    text.toLowerCase();
+
+  if (
+    value.includes(
+      "нравится"
+    ) ||
+    value.includes(
+      "люблю"
+    ) ||
+    value.includes(
+      "предпочитаю"
+    ) ||
+    value.includes(
+      "не люблю"
+    ) ||
+    value.includes(
+      "хочу чтобы"
+    )
+  ) {
+    return "preference";
+  }
+
+  if (
+    value.includes(
+      "моя цель"
+    ) ||
+    value.includes(
+      "цель:"
+    ) ||
+    value.includes(
+      "хочу достичь"
+    ) ||
+    value.includes(
+      "планирую"
+    )
+  ) {
+    return "goal";
+  }
+
+  if (
+    value.includes(
+      "проект"
+    ) ||
+    value.includes(
+      "разрабатываю"
+    ) ||
+    value.includes(
+      "разработка"
+    ) ||
+    value.includes(
+      "бот"
+    )
+  ) {
+    return "project";
+  }
+
+  if (
+    value.includes(
+      "важно"
+    ) ||
+    value.includes(
+      "запомни обязательно"
+    ) ||
+    value.includes(
+      "не забудь"
+    )
+  ) {
+    return "important";
+  }
+
+  return "fact";
+}
+
+function nexusExtractMemoryCandidate(
+  message: string
+): {
+  text: string;
+  category: NexusMemoryCategory;
+} | null {
+  const clean =
+    message.trim();
+
+  if (!clean) {
+    return null;
+  }
+
+  const patterns = [
+    /^запомни\s*[:\-]?\s*(.+)$/i,
+    /^запомни,\s*(.+)$/i,
+    /^помни\s*[:\-]?\s*(.+)$/i,
+    /^запиши в память\s*[:\-]?\s*(.+)$/i,
+    /^remember\s*[:\-]?\s*(.+)$/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match =
+      clean.match(pattern);
+
+    if (match?.[1]) {
+      const text =
+        nexusNormalizeMemoryText(
+          match[1]
+        );
+
+      return {
+        text,
+        category:
+          nexusDetectMemoryCategory(
+            text
+          ),
+      };
+    }
+  }
+
+  return null;
+}
+
+function nexusDetectAutomaticMemory(
+  message: string
+): {
+  text: string;
+  category: NexusMemoryCategory;
+} | null {
+  const clean =
+    nexusNormalizeMemoryText(
+      message
+    );
+
+  if (!clean) {
+    return null;
+  }
+
+  const patterns = [
+    /^я люблю (.+)$/i,
+    /^мне нравится (.+)$/i,
+    /^я предпочитаю (.+)$/i,
+    /^моя цель\s*[:\-]?\s*(.+)$/i,
+    /^я планирую\s+(.+)$/i,
+    /^мой проект\s*[:\-]?\s*(.+)$/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match =
+      clean.match(pattern);
+
+    if (!match?.[1]) {
+      continue;
+    }
+
+    const text =
+      clean;
+
+    return {
+      text,
+      category:
+        nexusDetectMemoryCategory(
+          text
+        ),
+    };
+  }
+
+  return null;
+}
+
+function nexusProcessMemoryCommand(
+  memory: NexusMemoryItem[],
+  message: string
+): {
+  memory: NexusMemoryItem[];
+  handled: boolean;
+  response: string | null;
+} {
+  const candidate =
+    nexusExtractMemoryCandidate(
+      message
+    );
+
+  if (!candidate) {
+    return {
+      memory,
+      handled: false,
+      response: null,
+    };
+  }
+
+  if (
+    nexusMemoryExists(
+      memory,
+      candidate.text
+    )
+  ) {
+    return {
+      memory,
+      handled: true,
+      response:
+        "Я уже помнил это.",
+    };
+  }
+
+  const updated =
+    nexusAddMemory(
+      memory,
+      candidate.text,
+      candidate.category
+    );
+
+  return {
+    memory: updated,
+    handled: true,
+    response:
+      "Запомнил. Я буду учитывать это в следующих разговорах.",
+  };
+}
+
+function nexusForgetMemoryByText(
+  memory: NexusMemoryItem[],
+  query: string
+): NexusMemoryItem[] {
+  const normalized =
+    nexusMemoryKey(query);
+
+  if (!normalized) {
+    return memory;
+  }
+
+  return memory.filter(
+    (item) =>
+      !nexusMemoryKey(
+        item.text
+      ).includes(normalized)
+  );
+}
+
+function nexusMemoryContext(
+  memory: NexusMemoryItem[],
+  enabled: boolean
+): {
+  enabled: boolean;
+  total: number;
+  important: NexusMemoryItem[];
+  recent: NexusMemoryItem[];
+  text: string;
+} {
+  if (!enabled) {
+    return {
+      enabled: false,
+      total: 0,
+      important: [],
+      recent: [],
+      text:
+        "Память отключена.",
+    };
+  }
+
+  const important =
+    nexusGetImportantMemories(
+      memory
+    );
+
+  const recent =
+    nexusGetRecentMemories(
+      memory,
+      30
+    );
+
+  return {
+    enabled: true,
+    total:
+      memory.length,
+    important,
+    recent,
+    text:
+      nexusFormatMemoryForAI(
+        memory,
+        30
+      ),
+  };
+}
+
+function nexusCreateMemoryEvent(
+  operation: NexusMemoryOperation,
+  memoryId: string | null
+): NexusMemoryEvent {
+  return {
+    id: nexusId(
+      "memory_event"
+    ),
+    operation,
+    memoryId,
+    timestamp:
+      nexusDate(),
+  };
+}
+
+const NEXUS_MEMORY_ENGINE = {
+  create:
+    nexusCreateMemory,
+
+  add:
+    nexusAddMemory,
+
+  update:
+    nexusUpdateMemory,
+
+  delete:
+    nexusDeleteMemory,
+
+  clear:
+    nexusClearMemory,
+
+  get:
+    nexusGetMemory,
+
+  exists:
+    nexusMemoryExists,
+
+  search:
+    nexusSearchMemorySmart,
+
+  byCategory:
+    nexusGetMemoriesByCategory,
+
+  important:
+    nexusGetImportantMemories,
+
+  recent:
+    nexusGetRecentMemories,
+
+  stats:
+    nexusGetMemoryStats,
+
+  formatForAI:
+    nexusFormatMemoryForAI,
+
+  category:
+    nexusDetectMemoryCategory,
+
+  extract:
+    nexusExtractMemoryCandidate,
+
+  automatic:
+    nexusDetectAutomaticMemory,
+
+  command:
+    nexusProcessMemoryCommand,
+
+  forgetByText:
+    nexusForgetMemoryByText,
+
+  context:
+    nexusMemoryContext,
+
+  event:
+    nexusCreateMemoryEvent,
+};
+
+registerNexusModule({
+  id: "memory-engine",
+  title: "Memory Engine",
+  description:
+    "Память пользователя и интеллектуальная работа с сохранённой информацией",
+  icon: "🧠",
+  section: "memory",
+  order: 3,
+});
+/* =========================================================
+   NEXUS — PART 5
+   AI CONTEXT ENGINE
+   Вставь полностью в конец PART 4
+   ========================================================= */
+
+type NexusAIContext = {
+  version: string;
+  current: {
+    date: string;
+    time: string;
+    timestamp: string;
+  };
+  application: {
+    name: string;
+    language: string;
+  };
+  conversation: {
+    chatId: string | null;
+    title: string;
+    messages: NexusMessage[];
+  };
+  memory: {
+    enabled: boolean;
+    items: NexusMemoryItem[];
+  };
+  notes: NexusNote[];
+  tasks: NexusTask[];
+  calendar: NexusCalendarEvent[];
+  timers: NexusTimer[];
+  files: NexusFile[];
+};
+
+type NexusAIContextOptions = {
+  messageLimit?: number;
+  memoryLimit?: number;
+  notesLimit?: number;
+  tasksLimit?: number;
+  eventsLimit?: number;
+  timersLimit?: number;
+  filesLimit?: number;
+};
+
+const NEXUS_AI_CONTEXT_LIMITS = {
+  messages: 20,
+  memory: 30,
+  notes: 20,
+  tasks: 30,
+  events: 30,
+  timers: 10,
+  files: 30,
+};
+
+function nexusGetContextOptions(
+  options?: NexusAIContextOptions
+) {
+  return {
+    messageLimit:
+      options?.messageLimit ??
+      NEXUS_AI_CONTEXT_LIMITS.messages,
+
+    memoryLimit:
+      options?.memoryLimit ??
+      NEXUS_AI_CONTEXT_LIMITS.memory,
+
+    notesLimit:
+      options?.notesLimit ??
+      NEXUS_AI_CONTEXT_LIMITS.notes,
+
+    tasksLimit:
+      options?.tasksLimit ??
+      NEXUS_AI_CONTEXT_LIMITS.tasks,
+
+    eventsLimit:
+      options?.eventsLimit ??
+      NEXUS_AI_CONTEXT_LIMITS.events,
+
+    timersLimit:
+      options?.timersLimit ??
+      NEXUS_AI_CONTEXT_LIMITS.timers,
+
+    filesLimit:
+      options?.filesLimit ??
+      NEXUS_AI_CONTEXT_LIMITS.files,
+  };
+}
+
+function nexusGetRecentNotes(
+  notes: NexusNote[],
+  limit: number
+): NexusNote[] {
+  return [...notes]
+    .sort(
+      (a, b) =>
+        new Date(
+          b.updatedAt
+        ).getTime() -
+        new Date(
+          a.updatedAt
+        ).getTime()
+    )
+    .slice(0, limit);
+}
+
+function nexusGetRecentTasks(
+  tasks: NexusTask[],
+  limit: number
+): NexusTask[] {
+  return [...tasks]
+    .sort(
+      (a, b) =>
+        new Date(
+          b.updatedAt
+        ).getTime() -
+        new Date(
+          a.updatedAt
+        ).getTime()
+    )
+    .slice(0, limit);
+}
+
+function nexusGetRecentEvents(
+  events: NexusCalendarEvent[],
+  limit: number
+): NexusCalendarEvent[] {
+  return [...events]
+    .sort(
+      (a, b) =>
+        `${a.date} ${a.time}`.localeCompare(
+          `${b.date} ${b.time}`
+        )
+    )
+    .slice(0, limit);
+}
+
+function nexusGetRecentTimers(
+  timers: NexusTimer[],
+  limit: number
+): NexusTimer[] {
+  return [...timers]
+    .sort(
+      (a, b) =>
+        new Date(
+          b.createdAt
+        ).getTime() -
+        new Date(
+          a.createdAt
+        ).getTime()
+    )
+    .slice(0, limit);
+}
+
+function nexusGetRecentFiles(
+  files: NexusFile[],
+  limit: number
+): NexusFile[] {
+  return [...files]
+    .sort(
+      (a, b) =>
+        new Date(
+          b.updatedAt
+        ).getTime() -
+        new Date(
+          a.updatedAt
+        ).getTime()
+    )
+    .slice(0, limit);
+}
+
+function nexusBuildAIContext(
+  data: {
+    message: string;
+    chat: NexusChat | null;
+    memory: NexusMemoryItem[];
+    notes: NexusNote[];
+    tasks: NexusTask[];
+    events: NexusCalendarEvent[];
+    timers: NexusTimer[];
+    files: NexusFile[];
+    settings: NexusSettings;
+    currentDate?: Date;
+  },
+  options?: NexusAIContextOptions
+): NexusAIContext {
+  const limits =
+    nexusGetContextOptions(
+      options
+    );
+
+  const currentDate =
+    data.currentDate ||
+    new Date();
+
+  const messages =
+    nexusGetRecentMessages(
+      data.chat,
+      limits.messageLimit
+    );
+
+  const memoryItems =
+    data.settings.memoryEnabled
+      ? nexusGetRecentMemories(
+          data.memory,
+          limits.memoryLimit
+        )
+      : [];
+
+  const recentNotes =
+    nexusGetRecentNotes(
+      data.notes,
+      limits.notesLimit
+    );
+
+  const recentTasks =
+    nexusGetRecentTasks(
+      data.tasks,
+      limits.tasksLimit
+    );
+
+  const recentEvents =
+    nexusGetRecentEvents(
+      data.events,
+      limits.eventsLimit
+    );
+
+  const recentTimers =
+    nexusGetRecentTimers(
+      data.timers,
+      limits.timersLimit
+    );
+
+  const recentFiles =
+    nexusGetRecentFiles(
+      data.files,
+      limits.filesLimit
+    );
+
+  return {
+    version:
+      NEXUS_VERSION,
+
+    current: {
+      date:
+        nexusDateKey(
+          currentDate
+        ),
+      time:
+        nexusTime(
+          currentDate
+        ),
+      timestamp:
+        currentDate.toISOString(),
+    },
+
+    application: {
+      name: "NEXUS",
+      language:
+        data.settings.language,
+    },
+
+    conversation: {
+      chatId:
+        data.chat?.id || null,
+
+      title:
+        data.chat?.title ||
+        "Новый чат",
+
+      messages,
+    },
+
+    memory: {
+      enabled:
+        data.settings
+          .memoryEnabled,
+
+      items:
+        memoryItems,
+    },
+
+    notes:
+      recentNotes,
+
+    tasks:
+      recentTasks,
+
+    calendar:
+      recentEvents,
+
+    timers:
+      recentTimers,
+
+    files:
+      recentFiles,
+  };
+}
+
+function nexusSerializeAIContext(
+  context: NexusAIContext
+): string {
+  return JSON.stringify(
+    context,
+    null,
+    2
+  );
+}
+
+function nexusBuildAIContextText(
+  data: {
+    message: string;
+    chat: NexusChat | null;
+    memory: NexusMemoryItem[];
+    notes: NexusNote[];
+    tasks: NexusTask[];
+    events: NexusCalendarEvent[];
+    timers: NexusTimer[];
+    files: NexusFile[];
+    settings: NexusSettings;
+    currentDate?: Date;
+  },
+  options?: NexusAIContextOptions
+): string {
+  const context =
+    nexusBuildAIContext(
+      data,
+      options
+    );
+
+  return nexusSerializeAIContext(
+    context
+  );
+}
+
+function nexusContextHasMemory(
+  context: NexusAIContext
+): boolean {
+  return (
+    context.memory.enabled &&
+    context.memory.items.length >
+      0
+  );
+}
+
+function nexusContextHasConversation(
+  context: NexusAIContext
+): boolean {
+  return (
+    context.conversation
+      .messages.length > 0
+  );
+}
+
+function nexusContextHasTasks(
+  context: NexusAIContext
+): boolean {
+  return context.tasks.length > 0;
+}
+
+function nexusContextHasNotes(
+  context: NexusAIContext
+): boolean {
+  return context.notes.length > 0;
+}
+
+function nexusContextHasCalendar(
+  context: NexusAIContext
+): boolean {
+  return (
+    context.calendar.length > 0
+  );
+}
+
+function nexusContextHasTimers(
+  context: NexusAIContext
+): boolean {
+  return context.timers.length > 0;
+}
+
+function nexusContextHasFiles(
+  context: NexusAIContext
+): boolean {
+  return context.files.length > 0;
+}
+
+function nexusGetContextSummary(
+  context: NexusAIContext
+) {
+  return {
+    version:
+      context.version,
+
+    date:
+      context.current.date,
+
+    time:
+      context.current.time,
+
+    chatMessages:
+      context.conversation
+        .messages.length,
+
+    memory:
+      context.memory.items.length,
+
+    notes:
+      context.notes.length,
+
+    tasks:
+      context.tasks.length,
+
+    calendar:
+      context.calendar.length,
+
+    timers:
+      context.timers.length,
+
+    files:
+      context.files.length,
+  };
+}
+
+function nexusCreateAISystemPrompt(
+  language: string
+): string {
+  return `
+Ты — NEXUS, персональный AI-помощник.
+
+Твоя задача:
+- понимать запрос пользователя;
+- учитывать доступный контекст;
+- использовать память, если она включена;
+- учитывать предыдущие сообщения;
+- помогать с задачами, заметками, календарём, временем и файлами;
+- отвечать естественно;
+- не выдумывать данные, которых нет в контексте;
+- не раскрывать внутреннюю техническую структуру контекста;
+- если информации недостаточно, честно сказать об этом.
+
+Язык интерфейса пользователя:
+${language}
+
+Текущая дата и время находятся в контексте.
+Не придумывай дату или время самостоятельно.
+`.trim();
+}
+
+function nexusCreateAIUserPrompt(
+  message: string,
+  context: NexusAIContext
+): string {
+  return `
+Запрос пользователя:
+${message}
+
+Контекст NEXUS:
+${nexusSerializeAIContext(
+  context
+)}
+`.trim();
+}
+
+function nexusPrepareAIRequestData(
+  data: {
+    message: string;
+    chat: NexusChat | null;
+    memory: NexusMemoryItem[];
+    notes: NexusNote[];
+    tasks: NexusTask[];
+    events: NexusCalendarEvent[];
+    timers: NexusTimer[];
+    files: NexusFile[];
+    settings: NexusSettings;
+    currentDate?: Date;
+  },
+  options?: NexusAIContextOptions
+) {
+  const context =
+    nexusBuildAIContext(
+      data,
+      options
+    );
+
+  return {
+    system:
+      nexusCreateAISystemPrompt(
+        data.settings.language
+      ),
+
+    user:
+      nexusCreateAIUserPrompt(
+        data.message,
+        context
+      ),
+
+    context,
+  };
+}
+
+const NEXUS_AI_CONTEXT_ENGINE = {
+  build:
+    nexusBuildAIContext,
+
+  text:
+    nexusBuildAIContextText,
+
+  serialize:
+    nexusSerializeAIContext,
+
+  summary:
+    nexusGetContextSummary,
+
+  systemPrompt:
+    nexusCreateAISystemPrompt,
+
+  userPrompt:
+    nexusCreateAIUserPrompt,
+
+  request:
+    nexusPrepareAIRequestData,
+
+  hasMemory:
+    nexusContextHasMemory,
+
+  hasConversation:
+    nexusContextHasConversation,
+
+  hasTasks:
+    nexusContextHasTasks,
+
+  hasNotes:
+    nexusContextHasNotes,
+
+  hasCalendar:
+    nexusContextHasCalendar,
+
+  hasTimers:
+    nexusContextHasTimers,
+
+  hasFiles:
+    nexusContextHasFiles,
+};
+
+registerNexusModule({
+  id: "ai-context-engine",
+  title: "AI Context Engine",
+  description:
+    "Формирование полного контекста для NEXUS AI",
+  icon: "◈",
+  section: "chat",
+  order: 4,
+});
+// ============================================================
+// NEXUS PART 6 — AI BRIDGE / PROVIDER ENGINE
+// ============================================================
+
+type NexusAIProvider =
+  | "openai"
+  | "local"
+  | "custom";
+
+type NexusAIRequest = {
+  provider: NexusAIProvider;
+  message: string;
+  context?: NexusAIContext | null;
+  systemPrompt?: string;
+  userPrompt?: string;
+  temperature?: number;
+  maxOutputTokens?: number;
+  endpoint?: string;
+  signal?: AbortSignal;
+};
+
+type NexusAIResponse = {
+  ok: boolean;
+  text: string;
+  provider: NexusAIProvider;
+  model?: string;
+  error?: string;
+  raw?: unknown;
+};
+
+type NexusAIConfig = {
+  provider: NexusAIProvider;
+  endpoint: string;
+  model: string;
+  temperature: number;
+  maxOutputTokens: number;
+  timeoutMs: number;
+  enabled: boolean;
+};
+
+type NexusAIEvent = {
+  id: string;
+  type:
+    | "request"
+    | "response"
+    | "error"
+    | "fallback";
+  provider: NexusAIProvider;
+  timestamp: string;
+  message?: string;
+  response?: string;
+  error?: string;
+};
+
+const NEXUS_AI_DEFAULT_CONFIG: NexusAIConfig = {
+  provider: "openai",
+  endpoint: "/api/nexus-ai",
+  model: "gpt-5.6",
+  temperature: 0.7,
+  maxOutputTokens: 1200,
+  timeoutMs: 30000,
+  enabled: true,
+};
+
+const NEXUS_AI_EVENTS: NexusAIEvent[] = [];
+
+const nexusAICloneConfig = (
+  config: NexusAIConfig
+): NexusAIConfig => ({
+  ...NEXUS_AI_DEFAULT_CONFIG,
+  ...config,
+});
+
+const nexusAIEvent = (
+  event: Omit<NexusAIEvent, "id" | "timestamp">
+): NexusAIEvent => ({
+  id: nexusId("ai-event"),
+  timestamp: new Date().toISOString(),
+  ...event,
+});
+
+const nexusAIRecordEvent = (
+  event: Omit<NexusAIEvent, "id" | "timestamp">
+) => {
+  const item = nexusAIEvent(event);
+
+  NEXUS_AI_EVENTS.push(item);
+
+  if (NEXUS_AI_EVENTS.length > 100) {
+    NEXUS_AI_EVENTS.splice(
+      0,
+      NEXUS_AI_EVENTS.length - 100
+    );
+  }
+
+  return item;
+};
+
+const nexusAIExtractText = (
+  data: any
+): string => {
+  if (!data) {
+    return "";
+  }
+
+  if (typeof data === "string") {
+    return data.trim();
+  }
+
+  if (
+    typeof data.output_text === "string"
+  ) {
+    return data.output_text.trim();
+  }
+
+  if (
+    typeof data.text === "string"
+  ) {
+    return data.text.trim();
+  }
+
+  if (
+    typeof data.message === "string"
+  ) {
+    return data.message.trim();
+  }
+
+  if (
+    typeof data.response === "string"
+  ) {
+    return data.response.trim();
+  }
+
+  if (
+    Array.isArray(data.output)
+  ) {
+    const parts: string[] = [];
+
+    for (const item of data.output) {
+      if (
+        typeof item?.text === "string"
+      ) {
+        parts.push(item.text);
+      }
+
+      if (
+        Array.isArray(item?.content)
+      ) {
+        for (const content of item.content) {
+          if (
+            typeof content?.text === "string"
+          ) {
+            parts.push(content.text);
+          }
+        }
+      }
+    }
+
+    if (parts.length > 0) {
+      return parts.join("\n").trim();
+    }
+  }
+
+  if (
+    Array.isArray(data.choices)
+  ) {
+    const choice = data.choices[0];
+
+    if (
+      typeof choice?.text === "string"
+    ) {
+      return choice.text.trim();
+    }
+
+    if (
+      typeof choice?.message?.content ===
+      "string"
+    ) {
+      return choice.message.content.trim();
+    }
+
+    if (
+      Array.isArray(choice?.message?.content)
+    ) {
+      return choice.message.content
+        .map((item: any) =>
+          typeof item?.text === "string"
+            ? item.text
+            : ""
+        )
+        .filter(Boolean)
+        .join("\n")
+        .trim();
+    }
+  }
+
+  return "";
+};
+
+const nexusAIRequestPayload = (
+  request: NexusAIRequest
+) => {
+  return {
+    model:
+      request.context
+        ? undefined
+        : undefined,
+    message: request.message,
+    context: request.context ?? null,
+    systemPrompt:
+      request.systemPrompt ?? "",
+    userPrompt:
+      request.userPrompt ??
+      request.message,
+    temperature:
+      request.temperature ??
+      NEXUS_AI_DEFAULT_CONFIG.temperature,
+    maxOutputTokens:
+      request.maxOutputTokens ??
+      NEXUS_AI_DEFAULT_CONFIG.maxOutputTokens,
+  };
+};
+
+const nexusAIAbortAfter = (
+  timeoutMs: number,
+  externalSignal?: AbortSignal
+) => {
+  const controller =
+    new AbortController();
+
+  const timer = setTimeout(() => {
+    controller.abort();
+  }, timeoutMs);
+
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      controller.abort();
+    } else {
+      externalSignal.addEventListener(
+        "abort",
+        () => controller.abort(),
+        { once: true }
+      );
+    }
+  }
+
+  return {
+    signal: controller.signal,
+    cleanup: () => clearTimeout(timer),
+  };
+};
+
+const nexusAICallBackend = async (
+  request: NexusAIRequest,
+  config: NexusAIConfig
+): Promise<NexusAIResponse> => {
+  const endpoint =
+    request.endpoint ||
+    config.endpoint;
+
+  if (!endpoint) {
+    return {
+      ok: false,
+      text: "",
+      provider: request.provider,
+      error:
+        "NEXUS AI endpoint is not configured.",
+    };
+  }
+
+  const timeout =
+    nexusAIAbortAfter(
+      config.timeoutMs,
+      request.signal
+    );
+
+  nexusAIRecordEvent({
+    type: "request",
+    provider: request.provider,
+    message: request.message,
+  });
+
+  try {
+    const response = await fetch(
+      endpoint,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type":
+            "application/json",
+        },
+        body: JSON.stringify(
+          nexusAIRequestPayload(request)
+        ),
+        signal: timeout.signal,
+      }
+    );
+
+    const raw =
+      await response.json().catch(
+        () => null
+      );
+
+    if (!response.ok) {
+      const error =
+        typeof raw?.error === "string"
+          ? raw.error
+          : `AI request failed with status ${response.status}.`;
+
+      nexusAIRecordEvent({
+        type: "error",
+        provider: request.provider,
+        message: request.message,
+        error,
+      });
+
+      return {
+        ok: false,
+        text: "",
+        provider: request.provider,
+        error,
+        raw,
+      };
+    }
+
+    const text =
+      nexusAIExtractText(raw);
+
+    if (!text) {
+      const error =
+        "AI returned an empty response.";
+
+      nexusAIRecordEvent({
+        type: "error",
+        provider: request.provider,
+        message: request.message,
+        error,
+      });
+
+      return {
+        ok: false,
+        text: "",
+        provider: request.provider,
+        error,
+        raw,
+      };
+    }
+
+    nexusAIRecordEvent({
+      type: "response",
+      provider: request.provider,
+      message: request.message,
+      response: text,
+    });
+
+    return {
+      ok: true,
+      text,
+      provider: request.provider,
+      model: config.model,
+      raw,
+    };
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Unknown AI request error.";
+
+    nexusAIRecordEvent({
+      type: "error",
+      provider: request.provider,
+      message: request.message,
+      error: message,
+    });
+
+    return {
+      ok: false,
+      text: "",
+      provider: request.provider,
+      error: message,
+    };
+  } finally {
+    timeout.cleanup();
+  }
+};
+
+const nexusAILocalResponse = (
+  message: string,
+  context?: NexusAIContext | null
+): string => {
+  const text =
+    message.trim().toLowerCase();
+
+  if (!text) {
+    return "Напиши мне что-нибудь.";
+  }
+
+  if (
+    text.includes("привет") ||
+    text.includes("здравствуй") ||
+    text === "хай" ||
+    text === "hello" ||
+    text === "hi"
+  ) {
+    return "Привет! Я NEXUS. Чем могу помочь?";
+  }
+
+  if (
+    text.includes("как дела") ||
+    text.includes("как ты")
+  ) {
+    return "Всё хорошо. Я готов работать.";
+  }
+
+  if (
+    text.includes("кто ты") ||
+    text.includes("ты кто")
+  ) {
+    return "Я NEXUS — персональный AI-помощник.";
+  }
+
+  if (
+    text.includes("что ты умеешь") ||
+    text.includes("что умеешь")
+  ) {
+    return [
+      "Я могу помогать с задачами, заметками,",
+      "планами, календарём, файлами и общением.",
+    ].join(" ");
+  }
+
+  if (
+    text.includes("время") &&
+    context
+  ) {
+    return `Сейчас ${nexusTime(
+      new Date()
+    )}.`;
+  }
+
+  if (
+    text.includes("дата") &&
+    context
+  ) {
+    return `Сегодня ${nexusDate(
+      new Date()
+    )}.`;
+  }
+
+  if (
+    text.includes("задач") &&
+    context
+  ) {
+    const count =
+      context.tasks?.length ?? 0;
+
+    if (count === 0) {
+      return "У тебя сейчас нет сохранённых задач.";
+    }
+
+    return `У тебя сохранено задач: ${count}.`;
+  }
+
+  if (
+    text.includes("заметк") &&
+    context
+  ) {
+    const count =
+      context.notes?.length ?? 0;
+
+    if (count === 0) {
+      return "У тебя пока нет заметок.";
+    }
+
+    return `У тебя сохранено заметок: ${count}.`;
+  }
+
+  if (
+    text.includes("памят") &&
+    context
+  ) {
+    const count =
+      context.memory?.length ?? 0;
+
+    return `В памяти NEXUS сейчас ${count} записей.`;
+  }
+
+  return [
+    "Я пока работаю в локальном режиме.",
+    "Когда AI-сервер подключён,",
+    "я смогу дать полноценный ответ.",
+  ].join(" ");
+};
+
+const nexusAIFallback = (
+  message: string,
+  context?: NexusAIContext | null
+): NexusAIResponse => {
+  const text =
+    nexusAILocalResponse(
+      message,
+      context
+    );
+
+  nexusAIRecordEvent({
+    type: "fallback",
+    provider: "local",
+    message,
+    response: text,
+  });
+
+  return {
+    ok: true,
+    text,
+    provider: "local",
+    model: "nexus-local",
+  };
+};
+
+const nexusAIRequest = async (
+  message: string,
+  context?: NexusAIContext | null,
+  customConfig?: Partial<NexusAIConfig>
+): Promise<NexusAIResponse> => {
+  const config =
+    nexusAICloneConfig({
+      ...NEXUS_AI_DEFAULT_CONFIG,
+      ...(customConfig || {}),
+    });
+
+  if (!config.enabled) {
+    return nexusAIFallback(
+      message,
+      context
+    );
+  }
+
+  if (
+    config.provider === "local"
+  ) {
+    return nexusAIFallback(
+      message,
+      context
+    );
+  }
+
+  const systemPrompt =
+    nexusAIContextSystemPrompt(
+      context
+    );
+
+  const userPrompt =
+    nexusAIContextUserPrompt(
+      message,
+      context
+    );
+
+  const result =
+    await nexusAICallBackend(
+      {
+        provider: config.provider,
+        message,
+        context,
+        systemPrompt,
+        userPrompt,
+        temperature:
+          config.temperature,
+        maxOutputTokens:
+          config.maxOutputTokens,
+        endpoint:
+          config.endpoint,
+      },
+      config
+    );
+
+  if (result.ok) {
+    return result;
+  }
+
+  return nexusAIFallback(
+    message,
+    context
+  );
+};
+
+const nexusAIGetEvents = (
+  limit = 50
+) => {
+  return NEXUS_AI_EVENTS
+    .slice(-Math.max(1, limit))
+    .map((item) => ({
+      ...item,
+    }));
+};
+
+const nexusAIClearEvents = () => {
+  NEXUS_AI_EVENTS.length = 0;
+};
+
+const nexusAIStats = () => {
+  const requests =
+    NEXUS_AI_EVENTS.filter(
+      (event) =>
+        event.type === "request"
+    ).length;
+
+  const responses =
+    NEXUS_AI_EVENTS.filter(
+      (event) =>
+        event.type === "response"
+    ).length;
+
+  const errors =
+    NEXUS_AI_EVENTS.filter(
+      (event) =>
+        event.type === "error"
+    ).length;
+
+  const fallbacks =
+    NEXUS_AI_EVENTS.filter(
+      (event) =>
+        event.type === "fallback"
+    ).length;
+
+  return {
+    total:
+      NEXUS_AI_EVENTS.length,
+    requests,
+    responses,
+    errors,
+    fallbacks,
+    successRate:
+      requests > 0
+        ? Math.round(
+            (responses / requests) *
+              100
+          )
+        : 0,
+  };
+};
+
+const NEXUS_AI_BRIDGE = {
+  request: nexusAIRequest,
+  backend: nexusAICallBackend,
+  local: nexusAIFallback,
+  extractText: nexusAIExtractText,
+  getEvents: nexusAIGetEvents,
+  clearEvents: nexusAIClearEvents,
+  stats: nexusAIStats,
+  defaults:
+    NEXUS_AI_DEFAULT_CONFIG,
+};
+
+registerNexusModule({
+  id: "ai-bridge",
+  name: "AI Bridge",
+  description:
+    "Connection layer between NEXUS and external AI providers.",
+  version: NEXUS_VERSION,
+  enabled: true,
+});
+// ============================================================
+// NEXUS PART 7 — AI INTENT & ACTION ENGINE
+// ============================================================
+
+type NexusIntentType =
+  | "chat"
+  | "remember"
+  | "forget"
+  | "note_create"
+  | "note_search"
+  | "task_create"
+  | "task_complete"
+  | "task_search"
+  | "calendar_create"
+  | "calendar_search"
+  | "timer_create"
+  | "timer_stop"
+  | "timer_search"
+  | "file_search"
+  | "memory_search"
+  | "help"
+  | "unknown";
+
+type NexusIntent = {
+  type: NexusIntentType;
+  confidence: number;
+  text: string;
+  parameters: Record<string, string>;
+};
+
+type NexusActionStatus =
+  | "ready"
+  | "success"
+  | "failed"
+  | "ignored";
+
+type NexusAction = {
+  id: string;
+  intent: NexusIntent;
+  status: NexusActionStatus;
+  message?: string;
+  createdAt: string;
+  result?: unknown;
+};
+
+type NexusIntentRule = {
+  type: NexusIntentType;
+  keywords: string[];
+  phrases?: string[];
+  priority: number;
+};
+
+const NEXUS_INTENT_RULES: NexusIntentRule[] = [
+  {
+    type: "remember",
+    keywords: [
+      "запомни",
+      "запомнить",
+      "помни",
+      "remember",
+    ],
+    phrases: [
+      "запомни что",
+      "запомни, что",
+      "remember that",
+    ],
+    priority: 100,
+  },
+  {
+    type: "forget",
+    keywords: [
+      "забудь",
+      "забыть",
+      "forget",
+    ],
+    priority: 100,
+  },
+  {
+    type: "note_create",
+    keywords: [
+      "заметка",
+      "заметку",
+      "запиши",
+      "записать",
+      "note",
+    ],
+    phrases: [
+      "создай заметку",
+      "сделай заметку",
+      "добавь заметку",
+      "create a note",
+    ],
+    priority: 90,
+  },
+  {
+    type: "note_search",
+    keywords: [
+      "заметки",
+      "заметках",
+      "заметок",
+      "notes",
+    ],
+    phrases: [
+      "найди заметку",
+      "покажи заметки",
+      "найди в заметках",
+      "search notes",
+    ],
+    priority: 80,
+  },
+  {
+    type: "task_create",
+    keywords: [
+      "задача",
+      "задачу",
+      "задачи",
+      "task",
+    ],
+    phrases: [
+      "создай задачу",
+      "добавь задачу",
+      "поставь задачу",
+      "create a task",
+      "add a task",
+    ],
+    priority: 90,
+  },
+  {
+    type: "task_complete",
+    keywords: [
+      "выполнил",
+      "выполнена",
+      "готово",
+      "завершил",
+      "complete",
+      "done",
+    ],
+    phrases: [
+      "задача выполнена",
+      "задачу выполнил",
+      "отметь выполненной",
+      "mark as done",
+    ],
+    priority: 85,
+  },
+  {
+    type: "task_search",
+    keywords: [
+      "задач",
+      "задачи",
+      "tasks",
+    ],
+    phrases: [
+      "покажи задачи",
+      "какие задачи",
+      "мои задачи",
+      "show tasks",
+    ],
+    priority: 75,
+  },
+  {
+    type: "calendar_create",
+    keywords: [
+      "событие",
+      "встреча",
+      "календарь",
+      "calendar",
+      "event",
+    ],
+    phrases: [
+      "добавь событие",
+      "создай событие",
+      "добавь в календарь",
+      "запланируй",
+      "create event",
+      "add to calendar",
+    ],
+    priority: 90,
+  },
+  {
+    type: "calendar_search",
+    keywords: [
+      "календаре",
+      "календарь",
+      "события",
+      "calendar",
+      "events",
+    ],
+    phrases: [
+      "что в календаре",
+      "покажи календарь",
+      "какие события",
+      "show calendar",
+    ],
+    priority: 75,
+  },
+  {
+    type: "timer_create",
+    keywords: [
+      "таймер",
+      "timer",
+    ],
+    phrases: [
+      "поставь таймер",
+      "запусти таймер",
+      "создай таймер",
+      "set a timer",
+      "start a timer",
+    ],
+    priority: 90,
+  },
+  {
+    type: "timer_stop",
+    keywords: [
+      "останови",
+      "остановить",
+      "выключи",
+      "стоп",
+      "stop",
+    ],
+    phrases: [
+      "останови таймер",
+      "выключи таймер",
+      "остановить таймер",
+      "stop timer",
+    ],
+    priority: 95,
+  },
+  {
+    type: "timer_search",
+    keywords: [
+      "таймеры",
+      "таймер",
+      "timers",
+    ],
+    phrases: [
+      "какие таймеры",
+      "покажи таймеры",
+      "активные таймеры",
+      "show timers",
+    ],
+    priority: 70,
+  },
+  {
+    type: "file_search",
+    keywords: [
+      "файл",
+      "файлы",
+      "папка",
+      "документ",
+      "files",
+      "folder",
+    ],
+    phrases: [
+      "найди файл",
+      "найди документ",
+      "покажи файлы",
+      "search files",
+    ],
+    priority: 75,
+  },
+  {
+    type: "memory_search",
+    keywords: [
+      "память",
+      "помнишь",
+      "вспомни",
+      "memory",
+      "remember",
+    ],
+    phrases: [
+      "что ты помнишь",
+      "что ты знаешь обо мне",
+      "покажи память",
+      "what do you remember",
+    ],
+    priority: 70,
+  },
+  {
+    type: "help",
+    keywords: [
+      "помощь",
+      "помоги",
+      "help",
+    ],
+    phrases: [
+      "что умеешь",
+      "как пользоваться",
+      "what can you do",
+    ],
+    priority: 60,
+  },
+];
+
+const nexusIntentNormalize = (
+  text: string
+): string => {
+  return text
+    .toLowerCase()
+    .replace(/[!?.,;:()[\]{}]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+};
+
+const nexusIntentContains = (
+  text: string,
+  value: string
+): boolean => {
+  return text.includes(
+    nexusIntentNormalize(value)
+  );
+};
+
+const nexusIntentScoreRule = (
+  text: string,
+  rule: NexusIntentRule
+): number => {
+  let score = 0;
+
+  const normalized =
+    nexusIntentNormalize(text);
+
+  for (const phrase of rule.phrases ?? []) {
+    if (
+      nexusIntentContains(
+        normalized,
+        phrase
+      )
+    ) {
+      score += 20;
+    }
+  }
+
+  for (const keyword of rule.keywords) {
+    if (
+      nexusIntentContains(
+        normalized,
+        keyword
+      )
+    ) {
+      score += 5;
+    }
+  }
+
+  score += rule.priority / 100;
+
+  return score;
+};
+
+const nexusIntentParameters = (
+  text: string,
+  type: NexusIntentType
+): Record<string, string> => {
+  const normalized =
+    nexusIntentNormalize(text);
+
+  const parameters: Record<
+    string,
+    string
+  > = {};
+
+  if (
+    type === "remember" ||
+    type === "forget"
+  ) {
+    const patterns = [
+      /^запомни\s+(.+)$/i,
+      /^запомни\s+что\s+(.+)$/i,
+      /^помни\s+(.+)$/i,
+      /^забудь\s+(.+)$/i,
+      /^забыть\s+(.+)$/i,
+      /^remember\s+(.+)$/i,
+      /^forget\s+(.+)$/i,
+    ];
+
+    for (const pattern of patterns) {
+      const match =
+        text.trim().match(pattern);
+
+      if (match?.[1]) {
+        parameters.content =
+          match[1].trim();
+        break;
+      }
+    }
+
+    if (!parameters.content) {
+      parameters.content = text.trim();
+    }
+  }
+
+  if (
+    type === "note_create"
+  ) {
+    const patterns = [
+      /^заметка\s*:?\s*(.+)$/i,
+      /^заметку\s*:?\s*(.+)$/i,
+      /^запиши\s*:?\s*(.+)$/i,
+      /^создай заметку\s*:?\s*(.+)$/i,
+      /^добавь заметку\s*:?\s*(.+)$/i,
+      /^note\s*:?\s*(.+)$/i,
+      /^create a note\s*:?\s*(.+)$/i,
+    ];
+
+    for (const pattern of patterns) {
+      const match =
+        text.trim().match(pattern);
+
+      if (match?.[1]) {
+        parameters.content =
+          match[1].trim();
+        break;
+      }
+    }
+
+    if (!parameters.content) {
+      parameters.content =
+        text.trim();
+    }
+  }
+
+  if (
+    type === "task_create"
+  ) {
+    const patterns = [
+      /^задача\s*:?\s*(.+)$/i,
+      /^задачу\s*:?\s*(.+)$/i,
+      /^создай задачу\s*:?\s*(.+)$/i,
+      /^добавь задачу\s*:?\s*(.+)$/i,
+      /^поставь задачу\s*:?\s*(.+)$/i,
+      /^task\s*:?\s*(.+)$/i,
+      /^create a task\s*:?\s*(.+)$/i,
+    ];
+
+    for (const pattern of patterns) {
+      const match =
+        text.trim().match(pattern);
+
+      if (match?.[1]) {
+        parameters.title =
+          match[1].trim();
+        break;
+      }
+    }
+
+    if (!parameters.title) {
+      parameters.title =
+        text.trim();
+    }
+  }
+
+  if (
+    type === "calendar_create"
+  ) {
+    const patterns = [
+      /^событие\s*:?\s*(.+)$/i,
+      /^создай событие\s*:?\s*(.+)$/i,
+      /^добавь событие\s*:?\s*(.+)$/i,
+      /^запланируй\s*:?\s*(.+)$/i,
+      /^event\s*:?\s*(.+)$/i,
+      /^create event\s*:?\s*(.+)$/i,
+    ];
+
+    for (const pattern of patterns) {
+      const match =
+        text.trim().match(pattern);
+
+      if (match?.[1]) {
+        parameters.title =
+          match[1].trim();
+        break;
+      }
+    }
+
+    if (!parameters.title) {
+      parameters.title =
+        text.trim();
+    }
+  }
+
+  if (
+    type === "timer_create"
+  ) {
+    const minuteMatch =
+      normalized.match(
+        /(\d+)\s*(?:мин|мину|минут|minute|minutes)/
+      );
+
+    const secondMatch =
+      normalized.match(
+        /(\d+)\s*(?:сек|секунд|second|seconds)/
+      );
+
+    if (minuteMatch?.[1]) {
+      parameters.minutes =
+        minuteMatch[1];
+    }
+
+    if (secondMatch?.[1]) {
+      parameters.seconds =
+        secondMatch[1];
+    }
+
+    if (!parameters.minutes &&
+        !parameters.seconds) {
+      const numberMatch =
+        normalized.match(
+          /(\d+)/
+        );
+
+      if (numberMatch?.[1]) {
+        parameters.minutes =
+          numberMatch[1];
+      }
+    }
+
+    parameters.name =
+      text
+        .replace(
+          /поставь таймер|запусти таймер|создай таймер|таймер|set a timer|start a timer/gi,
+          ""
+        )
+        .trim();
+  }
+
+  if (
+    type === "file_search" ||
+    type === "note_search" ||
+    type === "task_search"
+  ) {
+    parameters.query =
+      text
+        .replace(
+          /найди|найти|покажи|поиск|search|show/gi,
+          ""
+        )
+        .replace(
+          /файл|файлы|документ|заметку|заметки|задачу|задачи|notes|tasks|files/gi,
+          ""
+        )
+        .trim();
+  }
+
+  return parameters;
+};
+
+const nexusDetectIntent = (
+  text: string
+): NexusIntent => {
+  const normalized =
+    nexusIntentNormalize(text);
+
+  if (!normalized) {
+    return {
+      type: "unknown",
+      confidence: 0,
+      text,
+      parameters: {},
+    };
+  }
+
+  let bestType:
+    NexusIntentType = "chat";
+
+  let bestScore = 0;
+
+  for (const rule of NEXUS_INTENT_RULES) {
+    const score =
+      nexusIntentScoreRule(
+        normalized,
+        rule
+      );
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestType = rule.type;
+    }
+  }
+
+  if (
+    bestScore < 5
+  ) {
+    bestType = "chat";
+  }
+
+  const confidence =
+    Math.min(
+      1,
+      bestScore / 30
+    );
+
+  return {
+    type: bestType,
+    confidence,
+    text,
+    parameters:
+      nexusIntentParameters(
+        text,
+        bestType
+      ),
+  };
+};
+
+const nexusCreateAction = (
+  intent: NexusIntent
+): NexusAction => ({
+  id: nexusId("action"),
+  intent,
+  status: "ready",
+  createdAt:
+    new Date().toISOString(),
+});
+
+const nexusActionSuccess = (
+  action: NexusAction,
+  message: string,
+  result?: unknown
+): NexusAction => ({
+  ...action,
+  status: "success",
+  message,
+  result,
+});
+
+const nexusActionFailed = (
+  action: NexusAction,
+  message: string
+): NexusAction => ({
+  ...action,
+  status: "failed",
+  message,
+});
+
+const nexusActionIgnored = (
+  action: NexusAction,
+  message: string
+): NexusAction => ({
+  ...action,
+  status: "ignored",
+  message,
+});
+
+const nexusIntentDescription = (
+  intent: NexusIntentType
+): string => {
+  const descriptions:
+    Record<NexusIntentType, string> = {
+      chat: "Обычное общение",
+      remember: "Сохранение информации в память",
+      forget: "Удаление информации из памяти",
+      note_create: "Создание заметки",
+      note_search: "Поиск заметок",
+      task_create: "Создание задачи",
+      task_complete: "Завершение задачи",
+      task_search: "Поиск задач",
+      calendar_create: "Создание события календаря",
+      calendar_search: "Просмотр календаря",
+      timer_create: "Создание таймера",
+      timer_stop: "Остановка таймера",
+      timer_search: "Просмотр таймеров",
+      file_search: "Поиск файлов",
+      memory_search: "Поиск памяти",
+      help: "Запрос помощи",
+      unknown: "Неизвестная команда",
+    };
+
+  return descriptions[intent];
+};
+
+const nexusIntentNeedsConfirmation = (
+  intent: NexusIntentType
+): boolean => {
+  return (
+    intent === "forget" ||
+    intent === "timer_stop"
+  );
+};
+
+const nexusIntentCanExecute = (
+  intent: NexusIntent
+): boolean => {
+  if (
+    intent.type === "unknown"
+  ) {
+    return false;
+  }
+
+  if (
+    intent.confidence < 0.15
+  ) {
+    return false;
+  }
+
+  return true;
+};
+
+const NEXUS_INTENT_ENGINE = {
+  detect: nexusDetectIntent,
+  createAction: nexusCreateAction,
+  success: nexusActionSuccess,
+  failed: nexusActionFailed,
+  ignored: nexusActionIgnored,
+  description:
+    nexusIntentDescription,
+  needsConfirmation:
+    nexusIntentNeedsConfirmation,
+  canExecute:
+    nexusIntentCanExecute,
+  rules:
+    NEXUS_INTENT_RULES,
+};
+
+registerNexusModule({
+  id: "intent-engine",
+  name: "AI Intent Engine",
+  description:
+    "Understands user requests and converts them into NEXUS actions.",
+  version: NEXUS_VERSION,
+  enabled: true,
+});
+// ============================================================
+// NEXUS PART 8 — ACTION EXECUTION ENGINE
+// ============================================================
+
+type NexusActionExecutionContext = {
+  chats?: NexusChat[];
+  memory?: NexusMemoryItem[];
+  notes?: NexusNote[];
+  tasks?: NexusTask[];
+  events?: NexusCalendarEvent[];
+  timers?: NexusTimer[];
+  files?: NexusFile[];
+};
+
+type NexusActionExecutionResult = {
+  ok: boolean;
+  action: NexusAction;
+  message: string;
+  data?: unknown;
+};
+
+type NexusActionHandler = (
+  action: NexusAction,
+  context: NexusActionExecutionContext
+) => NexusActionExecutionResult;
+
+const NEXUS_ACTION_HISTORY: NexusAction[] = [];
+
+const nexusSaveActionHistory = (
+  action: NexusAction
+) => {
+  NEXUS_ACTION_HISTORY.push({
+    ...action,
+    intent: {
+      ...action.intent,
+      parameters: {
+        ...action.intent.parameters,
+      },
+    },
+  });
+
+  if (
+    NEXUS_ACTION_HISTORY.length > 200
+  ) {
+    NEXUS_ACTION_HISTORY.splice(
+      0,
+      NEXUS_ACTION_HISTORY.length - 200
+    );
+  }
+};
+
+const nexusGetActionHistory = (
+  limit = 50
+): NexusAction[] => {
+  return NEXUS_ACTION_HISTORY
+    .slice(-Math.max(1, limit))
+    .map((action) => ({
+      ...action,
+      intent: {
+        ...action.intent,
+        parameters: {
+          ...action.intent.parameters,
+        },
+      },
+    }));
+};
+
+const nexusClearActionHistory = () => {
+  NEXUS_ACTION_HISTORY.length = 0;
+};
+
+const nexusActionText = (
+  action: NexusAction
+): string => {
+  return (
+    action.intent.parameters.content ||
+    action.intent.parameters.title ||
+    action.intent.parameters.query ||
+    action.intent.text
+  ).trim();
+};
+
+const nexusExecuteRemember = (
+  action: NexusAction,
+  context: NexusActionExecutionContext
+): NexusActionExecutionResult => {
+  const content =
+    action.intent.parameters.content?.trim();
+
+  if (!content) {
+    return {
+      ok: false,
+      action: nexusActionFailed(
+        action,
+        "Не указано, что нужно запомнить."
+      ),
+      message:
+        "Не указано, что нужно запомнить.",
+    };
+  }
+
+  const currentMemory =
+    context.memory ?? [];
+
+  const result =
+    nexusMemoryDetectAutomatic(
+      content,
+      currentMemory
+    );
+
+  return {
+    ok: true,
+    action: nexusActionSuccess(
+      action,
+      "Информация подготовлена для сохранения.",
+      result
+    ),
+    message:
+      "Информация подготовлена для сохранения.",
+    data: result,
+  };
+};
+
+const nexusExecuteForget = (
+  action: NexusAction,
+  context: NexusActionExecutionContext
+): NexusActionExecutionResult => {
+  const content =
+    action.intent.parameters.content?.trim();
+
+  if (!content) {
+    return {
+      ok: false,
+      action: nexusActionFailed(
+        action,
+        "Не указано, что нужно забыть."
+      ),
+      message:
+        "Не указано, что нужно забыть.",
+    };
+  }
+
+  const memory =
+    context.memory ?? [];
+
+  const matches =
+    nexusMemorySearch(
+      memory,
+      content
+    );
+
+  if (matches.length === 0) {
+    return {
+      ok: true,
+      action: nexusActionSuccess(
+        action,
+        "Подходящая запись в памяти не найдена."
+      ),
+      message:
+        "Подходящая запись в памяти не найдена.",
+    };
+  }
+
+  return {
+    ok: true,
+    action: nexusActionSuccess(
+      action,
+      `Найдено записей для удаления: ${matches.length}.`,
+      matches
+    ),
+    message:
+      `Найдено записей для удаления: ${matches.length}.`,
+    data: matches,
+  };
+};
+
+const nexusExecuteNoteCreate = (
+  action: NexusAction
+): NexusActionExecutionResult => {
+  const content =
+    action.intent.parameters.content?.trim();
+
+  if (!content) {
+    return {
+      ok: false,
+      action: nexusActionFailed(
+        action,
+        "Текст заметки пуст."
+      ),
+      message:
+        "Текст заметки пуст.",
+    };
+  }
+
+  const note: NexusNote = {
+    id: nexusId("note"),
+    title:
+      content.length > 50
+        ? content.slice(0, 50) + "..."
+        : content,
+    content,
+    createdAt:
+      new Date().toISOString(),
+    updatedAt:
+      new Date().toISOString(),
+  };
+
+  return {
+    ok: true,
+    action: nexusActionSuccess(
+      action,
+      "Заметка создана.",
+      note
+    ),
+    message:
+      "Заметка создана.",
+    data: note,
+  };
+};
+
+const nexusExecuteNoteSearch = (
+  action: NexusAction,
+  context: NexusActionExecutionContext
+): NexusActionExecutionResult => {
+  const query =
+    action.intent.parameters.query?.trim() ||
+    "";
+
+  const notes =
+    context.notes ?? [];
+
+  if (!query) {
+    return {
+      ok: true,
+      action: nexusActionSuccess(
+        action,
+        `Найдено заметок: ${notes.length}.`,
+        notes
+      ),
+      message:
+        `Найдено заметок: ${notes.length}.`,
+      data: notes,
+    };
+  }
+
+  const normalized =
+    query.toLowerCase();
+
+  const matches =
+    notes.filter((note) =>
+      `${note.title} ${note.content}`
+        .toLowerCase()
+        .includes(normalized)
+    );
+
+  return {
+    ok: true,
+    action: nexusActionSuccess(
+      action,
+      `Найдено заметок: ${matches.length}.`,
+      matches
+    ),
+    message:
+      `Найдено заметок: ${matches.length}.`,
+    data: matches,
+  };
+};
+
+const nexusExecuteTaskCreate = (
+  action: NexusAction
+): NexusActionExecutionResult => {
+  const title =
+    action.intent.parameters.title?.trim();
+
+  if (!title) {
+    return {
+      ok: false,
+      action: nexusActionFailed(
+        action,
+        "Название задачи пустое."
+      ),
+      message:
+        "Название задачи пустое.",
+    };
+  }
+
+  const task: NexusTask = {
+    id: nexusId("task"),
+    title,
+    description: "",
+    completed: false,
+    createdAt:
+      new Date().toISOString(),
+  };
+
+  return {
+    ok: true,
+    action: nexusActionSuccess(
+      action,
+      "Задача создана.",
+      task
+    ),
+    message:
+      "Задача создана.",
+    data: task,
+  };
+};
+
+const nexusExecuteTaskSearch = (
+  action: NexusAction,
+  context: NexusActionExecutionContext
+): NexusActionExecutionResult => {
+  const query =
+    action.intent.parameters.query?.trim() ||
+    "";
+
+  const tasks =
+    context.tasks ?? [];
+
+  if (!query) {
+    return {
+      ok: true,
+      action: nexusActionSuccess(
+        action,
+        `Найдено задач: ${tasks.length}.`,
+        tasks
+      ),
+      message:
+        `Найдено задач: ${tasks.length}.`,
+      data: tasks,
+    };
+  }
+
+  const normalized =
+    query.toLowerCase();
+
+  const matches =
+    tasks.filter((task) =>
+      `${task.title} ${task.description}`
+        .toLowerCase()
+        .includes(normalized)
+    );
+
+  return {
+    ok: true,
+    action: nexusActionSuccess(
+      action,
+      `Найдено задач: ${matches.length}.`,
+      matches
+    ),
+    message:
+      `Найдено задач: ${matches.length}.`,
+    data: matches,
+  };
+};
+
+const nexusExecuteCalendarCreate = (
+  action: NexusAction
+): NexusActionExecutionResult => {
+  const title =
+    action.intent.parameters.title?.trim();
+
+  if (!title) {
+    return {
+      ok: false,
+      action: nexusActionFailed(
+        action,
+        "Название события пустое."
+      ),
+      message:
+        "Название события пустое.",
+    };
+  }
+
+  const event: NexusCalendarEvent = {
+    id: nexusId("event"),
+    title,
+    description: "",
+    date: nexusDateKey(
+      new Date()
+    ),
+    time: "",
+    createdAt:
+      new Date().toISOString(),
+  };
+
+  return {
+    ok: true,
+    action: nexusActionSuccess(
+      action,
+      "Событие создано.",
+      event
+    ),
+    message:
+      "Событие создано.",
+    data: event,
+  };
+};
+
+const nexusExecuteCalendarSearch = (
+  action: NexusAction,
+  context: NexusActionExecutionContext
+): NexusActionExecutionResult => {
+  const events =
+    context.events ?? [];
+
+  return {
+    ok: true,
+    action: nexusActionSuccess(
+      action,
+      `Найдено событий: ${events.length}.`,
+      events
+    ),
+    message:
+      `Найдено событий: ${events.length}.`,
+    data: events,
+  };
+};
+
+const nexusExecuteTimerCreate = (
+  action: NexusAction
+): NexusActionExecutionResult => {
+  const minutes =
+    Number(
+      action.intent.parameters.minutes || 0
+    );
+
+  const seconds =
+    Number(
+      action.intent.parameters.seconds || 0
+    );
+
+  const totalSeconds =
+    Math.max(
+      0,
+      minutes * 60 + seconds
+    );
+
+  if (totalSeconds <= 0) {
+    return {
+      ok: false,
+      action: nexusActionFailed(
+        action,
+        "Не удалось определить длительность таймера."
+      ),
+      message:
+        "Не удалось определить длительность таймера.",
+    };
+  }
+
+  const timer: NexusTimer = {
+    id: nexusId("timer"),
+    name:
+      action.intent.parameters.name ||
+      "Таймер",
+    duration:
+      totalSeconds,
+    remaining:
+      totalSeconds,
+    running: false,
+    createdAt:
+      new Date().toISOString(),
+  };
+
+  return {
+    ok: true,
+    action: nexusActionSuccess(
+      action,
+      "Таймер создан.",
+      timer
+    ),
+    message:
+      "Таймер создан.",
+    data: timer,
+  };
+};
+
+const nexusExecuteTimerSearch = (
+  action: NexusAction,
+  context: NexusActionExecutionContext
+): NexusActionExecutionResult => {
+  const timers =
+    context.timers ?? [];
+
+  return {
+    ok: true,
+    action: nexusActionSuccess(
+      action,
+      `Найдено таймеров: ${timers.length}.`,
+      timers
+    ),
+    message:
+      `Найдено таймеров: ${timers.length}.`,
+    data: timers,
+  };
+};
+
+const nexusExecuteFileSearch = (
+  action: NexusAction,
+  context: NexusActionExecutionContext
+): NexusActionExecutionResult => {
+  const query =
+    action.intent.parameters.query?.trim() ||
+    "";
+
+  const files =
+    context.files ?? [];
+
+  if (!query) {
+    return {
+      ok: true,
+      action: nexusActionSuccess(
+        action,
+        `Найдено файлов: ${files.length}.`,
+        files
+      ),
+      message:
+        `Найдено файлов: ${files.length}.`,
+      data: files,
+    };
+  }
+
+  const normalized =
+    query.toLowerCase();
+
+  const matches =
+    files.filter((file) =>
+      file.name
+        .toLowerCase()
+        .includes(normalized)
+    );
+
+  return {
+    ok: true,
+    action: nexusActionSuccess(
+      action,
+      `Найдено файлов: ${matches.length}.`,
+      matches
+    ),
+    message:
+      `Найдено файлов: ${matches.length}.`,
+    data: matches,
+  };
+};
+
+const NEXUS_ACTION_HANDLERS:
+  Partial<
+    Record<
+      NexusIntentType,
+      NexusActionHandler
+    >
+  > = {
+  remember:
+    nexusExecuteRemember,
+
+  forget:
+    nexusExecuteForget,
+
+  note_create:
+    nexusExecuteNoteCreate,
+
+  note_search:
+    nexusExecuteNoteSearch,
+
+  task_create:
+    nexusExecuteTaskCreate,
+
+  task_search:
+    nexusExecuteTaskSearch,
+
+  calendar_create:
+    nexusExecuteCalendarCreate,
+
+  calendar_search:
+    nexusExecuteCalendarSearch,
+
+  timer_create:
+    nexusExecuteTimerCreate,
+
+  timer_search:
+    nexusExecuteTimerSearch,
+
+  file_search:
+    nexusExecuteFileSearch,
+};
+
+const nexusExecuteAction = (
+  action: NexusAction,
+  context: NexusActionExecutionContext
+): NexusActionExecutionResult => {
+  if (
+    !nexusIntentCanExecute(
+      action.intent
+    )
+  ) {
+    const ignored =
+      nexusActionIgnored(
+        action,
+        "Уверенность NEXUS в команде слишком низкая."
+      );
+
+    nexusSaveActionHistory(
+      ignored
+    );
+
+    return {
+      ok: false,
+      action: ignored,
+      message:
+        "Уверенность NEXUS в команде слишком низкая.",
+    };
+  }
+
+  if (
+    nexusIntentNeedsConfirmation(
+      action.intent.type
+    )
+  ) {
+    const confirmation =
+      nexusActionIgnored(
+        action,
+        "Действие требует подтверждения пользователя."
+      );
+
+    nexusSaveActionHistory(
+      confirmation
+    );
+
+    return {
+      ok: false,
+      action: confirmation,
+      message:
+        "Действие требует подтверждения пользователя.",
+    };
+  }
+
+  const handler =
+    NEXUS_ACTION_HANDLERS[
+      action.intent.type
+    ];
+
+  if (!handler) {
+    const failed =
+      nexusActionFailed(
+        action,
+        "Для этой команды ещё нет обработчика."
+      );
+
+    nexusSaveActionHistory(
+      failed
+    );
+
+    return {
+      ok: false,
+      action: failed,
+      message:
+        "Для этой команды ещё нет обработчика.",
+    };
+  }
+
+  try {
+    const result =
+      handler(
+        action,
+        context
+      );
+
+    nexusSaveActionHistory(
+      result.action
+    );
+
+    return result;
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Ошибка выполнения действия.";
+
+    const failed =
+      nexusActionFailed(
+        action,
+        message
+      );
+
+    nexusSaveActionHistory(
+      failed
+    );
+
+    return {
+      ok: false,
+      action: failed,
+      message,
+    };
+  }
+};
+
+const nexusProcessUserAction = (
+  text: string,
+  context: NexusActionExecutionContext
+): NexusActionExecutionResult => {
+  const intent =
+    nexusDetectIntent(text);
+
+  const action =
+    nexusCreateAction(intent);
+
+  return nexusExecuteAction(
+    action,
+    context
+  );
+};
+
+const NEXUS_ACTION_ENGINE = {
+  detect:
+    nexusDetectIntent,
+
+  create:
+    nexusCreateAction,
+
+  execute:
+    nexusExecuteAction,
+
+  process:
+    nexusProcessUserAction,
+
+  history:
+    nexusGetActionHistory,
+
+  clearHistory:
+    nexusClearActionHistory,
+
+  handlers:
+    NEXUS_ACTION_HANDLERS,
+};
+
+registerNexusModule({
+  id: "action-engine",
+  name: "Action Execution Engine",
+  description:
+    "Converts understood user requests into executable NEXUS actions.",
+  version: NEXUS_VERSION,
+  enabled: true,
+});
+// ============================================================
+// NEXUS PART 9 — SMART COMMAND PARSER
+// ============================================================
+
+type NexusCommandType =
+  | "remember"
+  | "forget"
+  | "note"
+  | "task"
+  | "calendar"
+  | "timer"
+  | "file"
+  | "memory"
+  | "help"
+  | "chat";
+
+type NexusParsedCommand = {
+  type: NexusCommandType;
+  raw: string;
+  value: string;
+  title: string;
+  date: string;
+  time: string;
+  minutes: number;
+  seconds: number;
+  confidence: number;
+};
+
+const nexusCommandEmpty = (
+  raw: string
+): NexusParsedCommand => ({
+  type: "chat",
+  raw,
+  value: "",
+  title: "",
+  date: "",
+  time: "",
+  minutes: 0,
+  seconds: 0,
+  confidence: 0,
+});
+
+const nexusCommandClean = (
+  value: string
+): string => {
+  return value
+    .replace(/\s+/g, " ")
+    .trim();
+};
+
+const nexusCommandExtractAfter = (
+  text: string,
+  patterns: RegExp[]
+): string => {
+  for (const pattern of patterns) {
+    const match =
+      text.match(pattern);
+
+    if (match?.[1]) {
+      return nexusCommandClean(
+        match[1]
+      );
+    }
+  }
+
+  return "";
+};
+
+const nexusCommandParseDuration = (
+  text: string
+): {
+  minutes: number;
+  seconds: number;
+} => {
+  const normalized =
+    nexusCommandClean(
+      text.toLowerCase()
+    );
+
+  let minutes = 0;
+  let seconds = 0;
+
+  const minuteMatch =
+    normalized.match(
+      /(\d+)\s*(?:минут(?:а|ы)?|мин\.?|m|minutes?|min)/
+    );
+
+  const secondMatch =
+    normalized.match(
+      /(\d+)\s*(?:секунд(?:а|ы)?|сек\.?|s|seconds?|sec)/
+    );
+
+  if (minuteMatch?.[1]) {
+    minutes =
+      Number(minuteMatch[1]);
+  }
+
+  if (secondMatch?.[1]) {
+    seconds =
+      Number(secondMatch[1]);
+  }
+
+  if (
+    minutes === 0 &&
+    seconds === 0
+  ) {
+    const number =
+      normalized.match(
+        /\b(\d+)\b/
+      );
+
+    if (number?.[1]) {
+      minutes =
+        Number(number[1]);
+    }
+  }
+
+  return {
+    minutes,
+    seconds,
+  };
+};
+
+const nexusCommandExtractTime = (
+  text: string
+): string => {
+  const match =
+    text.match(
+      /\b([01]?\d|2[0-3])[:.][0-5]\d\b/
+    );
+
+  if (!match) {
+    return "";
+  }
+
+  return match[0]
+    .replace(".", ":")
+    .padStart(5, "0");
+};
+
+const nexusCommandExtractDate = (
+  text: string
+): string => {
+  const direct =
+    text.match(
+      /\b(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})\b/
+    );
+
+  if (direct) {
+    return `${direct[1]}-${direct[2].padStart(
+      2,
+      "0"
+    )}-${direct[3].padStart(2, "0")}`;
+  }
+
+  const short =
+    text.match(
+      /\b(\d{1,2})[-/.](\d{1,2})\b/
+    );
+
+  if (short) {
+    const year =
+      new Date().getFullYear();
+
+    return `${year}-${short[2].padStart(
+      2,
+      "0"
+    )}-${short[1].padStart(2, "0")}`;
+  }
+
+  const today =
+    new Date();
+
+  const lower =
+    text.toLowerCase();
+
+  if (
+    lower.includes("сегодня") ||
+    lower.includes("today")
+  ) {
+    return nexusDateKey(today);
+  }
+
+  if (
+    lower.includes("завтра") ||
+    lower.includes("tomorrow")
+  ) {
+    const tomorrow =
+      new Date(today);
+
+    tomorrow.setDate(
+      tomorrow.getDate() + 1
+    );
+
+    return nexusDateKey(
+      tomorrow
+    );
+  }
+
+  return "";
+};
+
+const nexusCommandDetectType = (
+  text: string
+): {
+  type: NexusCommandType;
+  confidence: number;
+} => {
+  const normalized =
+    nexusIntentNormalize(text);
+
+  if (!normalized) {
+    return {
+      type: "chat",
+      confidence: 0,
+    };
+  }
+
+  const checks: Array<{
+    type: NexusCommandType;
+    words: string[];
+    confidence: number;
+  }> = [
+    {
+      type: "remember",
+      words: [
+        "запомни",
+        "запомнить",
+        "помни",
+        "remember",
+      ],
+      confidence: 0.98,
+    },
+    {
+      type: "forget",
+      words: [
+        "забудь",
+        "забыть",
+        "forget",
+      ],
+      confidence: 0.98,
+    },
+    {
+      type: "note",
+      words: [
+        "заметка",
+        "заметку",
+        "заметки",
+        "запиши",
+        "note",
+        "notes",
+      ],
+      confidence: 0.9,
+    },
+    {
+      type: "task",
+      words: [
+        "задача",
+        "задачу",
+        "задачи",
+        "task",
+        "tasks",
+      ],
+      confidence: 0.9,
+    },
+    {
+      type: "calendar",
+      words: [
+        "календарь",
+        "календаре",
+        "событие",
+        "события",
+        "встреча",
+        "calendar",
+        "event",
+      ],
+      confidence: 0.9,
+    },
+    {
+      type: "timer",
+      words: [
+        "таймер",
+        "таймеры",
+        "timer",
+        "timers",
+      ],
+      confidence: 0.95,
+    },
+    {
+      type: "file",
+      words: [
+        "файл",
+        "файлы",
+        "папка",
+        "документ",
+        "file",
+        "files",
+        "folder",
+      ],
+      confidence: 0.85,
+    },
+    {
+      type: "memory",
+      words: [
+        "память",
+        "помнишь",
+        "вспомни",
+        "memory",
+      ],
+      confidence: 0.85,
+    },
+    {
+      type: "help",
+      words: [
+        "помощь",
+        "помоги",
+        "help",
+      ],
+      confidence: 0.8,
+    },
+  ];
+
+  for (const check of checks) {
+    if (
+      check.words.some(
+        (word) =>
+          normalized.includes(word)
+      )
+    ) {
+      return {
+        type: check.type,
+        confidence:
+          check.confidence,
+      };
+    }
+  }
+
+  return {
+    type: "chat",
+    confidence: 0.4,
+  };
+};
+
+const nexusParseCommand = (
+  raw: string
+): NexusParsedCommand => {
+  const text =
+    nexusCommandClean(raw);
+
+  if (!text) {
+    return nexusCommandEmpty(
+      raw
+    );
+  }
+
+  const detected =
+    nexusCommandDetectType(
+      text
+    );
+
+  const result =
+    nexusCommandEmpty(
+      raw
+    );
+
+  result.type =
+    detected.type;
+
+  result.confidence =
+    detected.confidence;
+
+  if (
+    detected.type ===
+    "remember"
+  ) {
+    result.value =
+      nexusCommandExtractAfter(
+        text,
+        [
+          /^запомни\s+что\s+(.+)$/i,
+          /^запомни\s+(.+)$/i,
+          /^помни\s+(.+)$/i,
+          /^remember\s+that\s+(.+)$/i,
+          /^remember\s+(.+)$/i,
+        ]
+      );
+
+    if (!result.value) {
+      result.value =
+        text;
+    }
+  }
+
+  if (
+    detected.type ===
+    "forget"
+  ) {
+    result.value =
+      nexusCommandExtractAfter(
+        text,
+        [
+          /^забудь\s+(.+)$/i,
+          /^забыть\s+(.+)$/i,
+          /^forget\s+(.+)$/i,
+        ]
+      );
+
+    if (!result.value) {
+      result.value =
+        text;
+    }
+  }
+
+  if (
+    detected.type ===
+    "note"
+  ) {
+    result.value =
+      nexusCommandExtractAfter(
+        text,
+        [
+          /^заметка\s*:?\s*(.+)$/i,
+          /^заметку\s*:?\s*(.+)$/i,
+          /^создай заметку\s*:?\s*(.+)$/i,
+          /^добавь заметку\s*:?\s*(.+)$/i,
+          /^запиши\s*:?\s*(.+)$/i,
+          /^note\s*:?\s*(.+)$/i,
+          /^create a note\s*:?\s*(.+)$/i,
+        ]
+      );
+
+    result.title =
+      result.value ||
+      "Новая заметка";
+  }
+
+  if (
+    detected.type ===
+    "task"
+  ) {
+    result.value =
+      nexusCommandExtractAfter(
+        text,
+        [
+          /^задача\s*:?\s*(.+)$/i,
+          /^задачу\s*:?\s*(.+)$/i,
+          /^создай задачу\s*:?\s*(.+)$/i,
+          /^добавь задачу\s*:?\s*(.+)$/i,
+          /^поставь задачу\s*:?\s*(.+)$/i,
+          /^task\s*:?\s*(.+)$/i,
+          /^create a task\s*:?\s*(.+)$/i,
+        ]
+      );
+
+    result.title =
+      result.value ||
+      "Новая задача";
+
+    result.date =
+      nexusCommandExtractDate(
+        text
+      );
+
+    result.time =
+      nexusCommandExtractTime(
+        text
+      );
+  }
+
+  if (
+    detected.type ===
+    "calendar"
+  ) {
+    result.value =
+      nexusCommandExtractAfter(
+        text,
+        [
+          /^событие\s*:?\s*(.+)$/i,
+          /^создай событие\s*:?\s*(.+)$/i,
+          /^добавь событие\s*:?\s*(.+)$/i,
+          /^запланируй\s*:?\s*(.+)$/i,
+          /^встреча\s*:?\s*(.+)$/i,
+          /^event\s*:?\s*(.+)$/i,
+          /^create event\s*:?\s*(.+)$/i,
+        ]
+      );
+
+    result.title =
+      result.value ||
+      "Новое событие";
+
+    result.date =
+      nexusCommandExtractDate(
+        text
+      );
+
+    result.time =
+      nexusCommandExtractTime(
+        text
+      );
+  }
+
+  if (
+    detected.type ===
+    "timer"
+  ) {
+    const duration =
+      nexusCommandParseDuration(
+        text
+      );
+
+    result.minutes =
+      duration.minutes;
+
+    result.seconds =
+      duration.seconds;
+
+    result.value =
+      text
+        .replace(
+          /поставь таймер|запусти таймер|создай таймер|таймер/gi,
+          ""
+        )
+        .trim();
+
+    if (!result.value) {
+      result.value =
+        "Таймер";
+    }
+  }
+
+  if (
+    detected.type ===
+    "file"
+  ) {
+    result.value =
+      nexusCommandExtractAfter(
+        text,
+        [
+          /^найди файл\s*:?\s*(.+)$/i,
+          /^найди документ\s*:?\s*(.+)$/i,
+          /^покажи файл\s*:?\s*(.+)$/i,
+          /^поиск файлов\s*:?\s*(.+)$/i,
+          /^search files\s*:?\s*(.+)$/i,
+        ]
+      );
+  }
+
+  if (
+    detected.type ===
+    "memory"
+  ) {
+    result.value =
+      nexusCommandExtractAfter(
+        text,
+        [
+          /^найди в памяти\s*:?\s*(.+)$/i,
+          /^память\s*:?\s*(.+)$/i,
+          /^search memory\s*:?\s*(.+)$/i,
+        ]
+      );
+  }
+
+  return result;
+};
+
+const nexusCommandToIntent = (
+  command: NexusParsedCommand
+): NexusIntent => {
+  const map:
+    Record<
+      NexusCommandType,
+      NexusIntentType
+    > = {
+    remember: "remember",
+    forget: "forget",
+    note: "note_create",
+    task: "task_create",
+    calendar: "calendar_create",
+    timer: "timer_create",
+    file: "file_search",
+    memory: "memory_search",
+    help: "help",
+    chat: "chat",
+  };
+
+  const parameters:
+    Record<string, string> = {};
+
+  if (command.value) {
+    parameters.content =
+      command.value;
+    parameters.query =
+      command.value;
+  }
+
+  if (command.title) {
+    parameters.title =
+      command.title;
+  }
+
+  if (command.date) {
+    parameters.date =
+      command.date;
+  }
+
+  if (command.time) {
+    parameters.time =
+      command.time;
+  }
+
+  if (command.minutes > 0) {
+    parameters.minutes =
+      String(command.minutes);
+  }
+
+  if (command.seconds > 0) {
+    parameters.seconds =
+      String(command.seconds);
+  }
+
+  return {
+    type: map[command.type],
+    confidence:
+      command.confidence,
+    text: command.raw,
+    parameters,
+  };
+};
+
+const nexusCommandIsAction = (
+  command: NexusParsedCommand
+): boolean => {
+  return (
+    command.type !== "chat" &&
+    command.type !== "help" &&
+    command.confidence >= 0.5
+  );
+};
+
+const nexusCommandSummary = (
+  command: NexusParsedCommand
+): string => {
+  switch (command.type) {
+    case "remember":
+      return `Запомнить: ${
+        command.value
+      }`;
+
+    case "forget":
+      return `Забыть: ${
+        command.value
+      }`;
+
+    case "note":
+      return `Создать заметку: ${
+        command.title
+      }`;
+
+    case "task":
+      return `Создать задачу: ${
+        command.title
+      }`;
+
+    case "calendar":
+      return `Создать событие: ${
+        command.title
+      }`;
+
+    case "timer":
+      return `Таймер: ${
+        command.minutes
+      } мин ${
+        command.seconds
+      } сек`;
+
+    case "file":
+      return `Поиск файла: ${
+        command.value || "все"
+      }`;
+
+    case "memory":
+      return `Поиск памяти: ${
+        command.value || "все"
+      }`;
+
+    case "help":
+      return "Запрос помощи";
+
+    default:
+      return "Обычное сообщение";
+  }
+};
+
+const NEXUS_COMMAND_ENGINE = {
+  parse:
+    nexusParseCommand,
+
+  toIntent:
+    nexusCommandToIntent,
+
+  isAction:
+    nexusCommandIsAction,
+
+  summary:
+    nexusCommandSummary,
+
+  duration:
+    nexusCommandParseDuration,
+
+  date:
+    nexusCommandExtractDate,
+
+  time:
+    nexusCommandExtractTime,
+};
+
+registerNexusModule({
+  id: "command-engine",
+  name: "Smart Command Parser",
+  description:
+    "Parses natural language commands before they reach the AI.",
+  version: NEXUS_VERSION,
+  enabled: true,
+});
+// ============================================================
+// NEXUS PART 10 — SMART RESPONSE & CONVERSATION ENGINE
+// ============================================================
+
+type NexusResponseMode =
+  | "direct"
+  | "contextual"
+  | "action"
+  | "clarification"
+  | "fallback";
+
+type NexusResponseProfile = {
+  mode: NexusResponseMode;
+  language: string;
+  concise: boolean;
+  useContext: boolean;
+  useMemory: boolean;
+};
+
+type NexusResponseResult = {
+  text: string;
+  mode: NexusResponseMode;
+  intent: NexusIntent;
+  action?: NexusAction;
+};
+
+type NexusConversationContext = {
+  currentMessage: string;
+  previousMessages: NexusMessage[];
+  memory: NexusMemoryItem[];
+  notes: NexusNote[];
+  tasks: NexusTask[];
+  events: NexusCalendarEvent[];
+  timers: NexusTimer[];
+  files: NexusFile[];
+  settings?: NexusSettings;
+};
+
+const nexusDetectLanguage = (
+  text: string
+): string => {
+  const value =
+    text.toLowerCase();
+
+  const spanish =
+    /[áéíóúñ¿¡]/i.test(text) ||
+    /\b(hola|gracias|quiero|puedo|como|para|qué|que|donde|dónde)\b/i.test(
+      value
+    );
+
+  const french =
+    /[àâçéèêëîïôûùüÿœ]/i.test(text) ||
+    /\b(bonjour|merci|avec|pour|quoi|comment|je|vous)\b/i.test(
+      value
+    );
+
+  const japanese =
+    /[\u3040-\u30ff\u3400-\u9fff]/.test(
+      text
+    );
+
+  if (japanese) {
+    return "ja";
+  }
+
+  if (spanish) {
+    return "es";
+  }
+
+  if (french) {
+    return "fr";
+  }
+
+  return "ru";
+};
+
+const nexusResponseProfile = (
+  text: string,
+  settings?: NexusSettings
+): NexusResponseProfile => {
+  const language =
+    settings?.language ||
+    nexusDetectLanguage(text);
+
+  return {
+    mode: "direct",
+    language,
+    concise: text.length < 120,
+    useContext: true,
+    useMemory: true,
+  };
+};
+
+const nexusConversationLastMessage = (
+  messages: NexusMessage[]
+): NexusMessage | null => {
+  if (messages.length === 0) {
+    return null;
+  }
+
+  return messages[messages.length - 1];
+};
+
+const nexusConversationRecent = (
+  messages: NexusMessage[],
+  limit = 12
+): NexusMessage[] => {
+  return messages
+    .slice(-Math.max(1, limit))
+    .map((message) => ({
+      ...message,
+    }));
+};
+
+const nexusConversationTopic = (
+  messages: NexusMessage[]
+): string => {
+  const recent =
+    nexusConversationRecent(
+      messages,
+      6
+    );
+
+  if (recent.length === 0) {
+    return "";
+  }
+
+  const words =
+    recent
+      .map(
+        (message) =>
+          message.content
+      )
+      .join(" ")
+      .split(/\s+/)
+      .map((word) =>
+        word
+          .toLowerCase()
+          .replace(
+            /[^a-zа-яё0-9]/gi,
+            ""
+          )
+      )
+      .filter(
+        (word) =>
+          word.length >= 5
+      );
+
+  const counts =
+    new Map<string, number>();
+
+  for (const word of words) {
+    counts.set(
+      word,
+      (counts.get(word) || 0) + 1
+    );
+  }
+
+  return (
+    [...counts.entries()]
+      .sort(
+        (a, b) =>
+          b[1] - a[1]
+      )[0]?.[0] || ""
+  );
+};
+
+const nexusConversationContext = (
+  context: NexusConversationContext
+): NexusAIContext => {
+  return nexusAIContextBuild(
+    context.currentMessage,
+    {
+      messages:
+        context.previousMessages,
+      memory:
+        context.memory,
+      notes:
+        context.notes,
+      tasks:
+        context.tasks,
+      events:
+        context.events,
+      timers:
+        context.timers,
+      files:
+        context.files,
+      settings:
+        context.settings,
+    }
+  );
+};
+
+const nexusResponseGreeting = (
+  language: string
+): string => {
+  if (language === "es") {
+    return "¡Hola! ¿En qué puedo ayudarte?";
+  }
+
+  if (language === "fr") {
+    return "Bonjour ! Comment puis-je t'aider ?";
+  }
+
+  if (language === "ja") {
+    return "こんにちは！何を手伝いましょうか？";
+  }
+
+  return "Привет! Чем могу помочь?";
+};
+
+const nexusResponseHelp = (
+  language: string
+): string => {
+  if (language === "es") {
+    return [
+      "Puedo ayudarte con conversaciones,",
+      "memoria, notas, tareas, calendario,",
+      "temporizadores y archivos.",
+    ].join(" ");
+  }
+
+  if (language === "fr") {
+    return [
+      "Je peux t'aider avec les conversations,",
+      "la mémoire, les notes, les tâches,",
+      "le calendrier, les minuteurs et les fichiers.",
+    ].join(" ");
+  }
+
+  if (language === "ja") {
+    return [
+      "会話、メモリー、ノート、タスク、",
+      "カレンダー、タイマー、ファイルを管理できます。",
+    ].join("");
+  }
+
+  return [
+    "Я могу помогать с общением,",
+    "памятью, заметками, задачами,",
+    "календарём, таймерами и файлами.",
+  ].join(" ");
+};
+
+const nexusResponseForIntent = (
+  intent: NexusIntent,
+  language: string
+): string | null => {
+  if (
+    intent.type === "help"
+  ) {
+    return nexusResponseHelp(
+      language
+    );
+  }
+
+  if (
+    intent.type === "memory_search"
+  ) {
+    if (language === "es") {
+      return "Puedo buscar нужную информацию в памяти.";
+    }
+
+    if (language === "fr") {
+      return "Je peux rechercher les informations dans ma mémoire.";
+    }
+
+    if (language === "ja") {
+      return "メモリーから必要な情報を検索できます。";
+    }
+
+    return "Я могу найти нужную информацию в памяти.";
+  }
+
+  return null;
+};
+
+const nexusResponseNeedsClarification = (
+  intent: NexusIntent
+): boolean => {
+  if (
+    intent.type === "remember" ||
+    intent.type === "forget"
+  ) {
+    return (
+      !intent.parameters.content ||
+      intent.parameters.content.trim()
+        .length === 0
+    );
+  }
+
+  if (
+    intent.type === "note_create" ||
+    intent.type === "task_create" ||
+    intent.type === "calendar_create"
+  ) {
+    return (
+      !intent.parameters.title &&
+      !intent.parameters.content
+    );
+  }
+
+  if (
+    intent.type === "timer_create"
+  ) {
+    const minutes =
+      Number(
+        intent.parameters.minutes || 0
+      );
+
+    const seconds =
+      Number(
+        intent.parameters.seconds || 0
+      );
+
+    return (
+      minutes <= 0 &&
+      seconds <= 0
+    );
+  }
+
+  return false;
+};
+
+const nexusResponseClarification = (
+  intent: NexusIntent,
+  language: string
+): string => {
+  if (language === "es") {
+    if (
+      intent.type === "timer_create"
+    ) {
+      return "¿Cuánto tiempo debe durar el temporizador?";
+    }
+
+    return "¿Puedes уточнить, что именно нужно сделать?";
+  }
+
+  if (language === "fr") {
+    if (
+      intent.type === "timer_create"
+    ) {
+      return "Combien de temps doit durer le minuteur ?";
+    }
+
+    return "Peux-tu préciser ce qu'il faut faire ?";
+  }
+
+  if (language === "ja") {
+    if (
+      intent.type === "timer_create"
+    ) {
+      return "タイマーを何分または何秒にしますか？";
+    }
+
+    return "何をすればよいか、もう少し詳しく教えてください。";
+  }
+
+  if (
+    intent.type === "timer_create"
+  ) {
+    return "На сколько поставить таймер?";
+  }
+
+  if (
+    intent.type === "remember"
+  ) {
+    return "Что именно мне запомнить?";
+  }
+
+  if (
+    intent.type === "forget"
+  ) {
+    return "Что именно мне забыть?";
+  }
+
+  if (
+    intent.type === "note_create"
+  ) {
+    return "Что записать в заметку?";
+  }
+
+  if (
+    intent.type === "task_create"
+  ) {
+    return "Какую задачу создать?";
+  }
+
+  if (
+    intent.type === "calendar_create"
+  ) {
+    return "Какое событие добавить?";
+  }
+
+  return "Уточни, пожалуйста, что именно нужно сделать.";
+};
+
+const nexusResponseLocal = (
+  text: string,
+  context: NexusConversationContext
+): NexusResponseResult => {
+  const profile =
+    nexusResponseProfile(
+      text,
+      context.settings
+    );
+
+  const intent =
+    nexusDetectIntent(text);
+
+  const clarification =
+    nexusResponseNeedsClarification(
+      intent
+    );
+
+  if (clarification) {
+    return {
+      text:
+        nexusResponseClarification(
+          intent,
+          profile.language
+        ),
+      mode: "clarification",
+      intent,
+    };
+  }
+
+  const intentResponse =
+    nexusResponseForIntent(
+      intent,
+      profile.language
+    );
+
+  if (intentResponse) {
+    return {
+      text: intentResponse,
+      mode: "contextual",
+      intent,
+    };
+  }
+
+  const normalized =
+    text.toLowerCase();
+
+  if (
+    normalized === "привет" ||
+    normalized === "здравствуйте" ||
+    normalized === "hello" ||
+    normalized === "hi" ||
+    normalized === "hola" ||
+    normalized === "bonjour"
+  ) {
+    return {
+      text:
+        nexusResponseGreeting(
+          profile.language
+        ),
+      mode: "direct",
+      intent,
+    };
+  }
+
+  const local =
+    nexusAILocalResponse(
+      text,
+      nexusConversationContext(
+        context
+      )
+    );
+
+  return {
+    text: local,
+    mode: "fallback",
+    intent,
+  };
+};
+
+const nexusResponseGenerate = async (
+  text: string,
+  context: NexusConversationContext,
+  config?: Partial<NexusAIConfig>
+): Promise<NexusResponseResult> => {
+  const intent =
+    nexusDetectIntent(text);
+
+  const profile =
+    nexusResponseProfile(
+      text,
+      context.settings
+    );
+
+  if (
+    nexusResponseNeedsClarification(
+      intent
+    )
+  ) {
+    return {
+      text:
+        nexusResponseClarification(
+          intent,
+          profile.language
+        ),
+      mode: "clarification",
+      intent,
+    };
+  }
+
+  const direct =
+    nexusResponseForIntent(
+      intent,
+      profile.language
+    );
+
+  if (direct) {
+    return {
+      text: direct,
+      mode: "contextual",
+      intent,
+    };
+  }
+
+  const aiContext =
+    nexusConversationContext(
+      context
+    );
+
+  const ai =
+    await nexusAIRequest(
+      text,
+      aiContext,
+      config
+    );
+
+  if (ai.ok && ai.text) {
+    return {
+      text: ai.text,
+      mode: "contextual",
+      intent,
+    };
+  }
+
+  return nexusResponseLocal(
+    text,
+    context
+  );
+};
+
+const nexusResponseBuildPrompt = (
+  text: string,
+  context: NexusConversationContext
+): {
+  system: string;
+  user: string;
+} => {
+  const aiContext =
+    nexusConversationContext(
+      context
+    );
+
+  return {
+    system:
+      nexusAIContextSystemPrompt(
+        aiContext
+      ),
+
+    user:
+      nexusAIContextUserPrompt(
+        text,
+        aiContext
+      ),
+  };
+};
+
+const nexusResponseStats = (
+  messages: NexusMessage[]
+) => {
+  const userMessages =
+    messages.filter(
+      (message) =>
+        message.role === "user"
+    );
+
+  const assistantMessages =
+    messages.filter(
+      (message) =>
+        message.role === "assistant"
+    );
+
+  const totalCharacters =
+    messages.reduce(
+      (sum, message) =>
+        sum +
+        message.content.length,
+      0
+    );
+
+  return {
+    totalMessages:
+      messages.length,
+    userMessages:
+      userMessages.length,
+    assistantMessages:
+      assistantMessages.length,
+    totalCharacters,
+    averageMessageLength:
+      messages.length > 0
+        ? Math.round(
+            totalCharacters /
+              messages.length
+          )
+        : 0,
+    topic:
+      nexusConversationTopic(
+        messages
+      ),
+  };
+};
+
+const NEXUS_RESPONSE_ENGINE = {
+  generate:
+    nexusResponseGenerate,
+
+  local:
+    nexusResponseLocal,
+
+  prompt:
+    nexusResponseBuildPrompt,
+
+  language:
+    nexusDetectLanguage,
+
+  profile:
+    nexusResponseProfile,
+
+  stats:
+    nexusResponseStats,
+};
+
+registerNexusModule({
+  id: "response-engine",
+  name: "Smart Response Engine",
+  description:
+    "Builds contextual responses and connects conversation context with the AI bridge.",
+  version: NEXUS_VERSION,
+  enabled: true,
+});
