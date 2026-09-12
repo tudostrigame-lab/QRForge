@@ -7291,3 +7291,713 @@ registerNexusModule({
   version: NEXUS_VERSION,
   enabled: true,
 });
+// ============================================================
+// NEXUS PART 11 — MEMORY LEARNING & USER PROFILE ENGINE
+// ============================================================
+
+type NexusProfileField =
+  | "name"
+  | "language"
+  | "location"
+  | "occupation"
+  | "education"
+  | "interests"
+  | "goals"
+  | "preferences"
+  | "projects"
+  | "communication";
+
+type NexusProfileValue = {
+  id: string;
+  field: NexusProfileField;
+  value: string;
+  confidence: number;
+  source: "user" | "inference" | "system";
+  createdAt: string;
+  updatedAt: string;
+};
+
+type NexusLearningSignal =
+  | "explicit"
+  | "repeated"
+  | "correction"
+  | "preference"
+  | "goal"
+  | "project"
+  | "communication";
+
+type NexusLearningItem = {
+  id: string;
+  text: string;
+  signal: NexusLearningSignal;
+  confidence: number;
+  occurrences: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type NexusUserProfile = {
+  version: number;
+  fields: NexusProfileValue[];
+  learning: NexusLearningItem[];
+};
+
+const NEXUS_PROFILE_VERSION = 1;
+
+const NEXUS_PROFILE_DEFAULT: NexusUserProfile = {
+  version:
+    NEXUS_PROFILE_VERSION,
+  fields: [],
+  learning: [],
+};
+
+const nexusProfileNormalize = (
+  value: string
+): string => {
+  return value
+    .replace(/\s+/g, " ")
+    .trim();
+};
+
+const nexusProfileFindField = (
+  profile: NexusUserProfile,
+  field: NexusProfileField
+): NexusProfileValue | null => {
+  return (
+    profile.fields.find(
+      (item) =>
+        item.field === field
+    ) || null
+  );
+};
+
+const nexusProfileSetField = (
+  profile: NexusUserProfile,
+  field: NexusProfileField,
+  value: string,
+  confidence = 1,
+  source:
+    | "user"
+    | "inference"
+    | "system" = "user"
+): NexusUserProfile => {
+  const normalized =
+    nexusProfileNormalize(
+      value
+    );
+
+  if (!normalized) {
+    return profile;
+  }
+
+  const existing =
+    nexusProfileFindField(
+      profile,
+      field
+    );
+
+  const now =
+    new Date().toISOString();
+
+  if (existing) {
+    existing.value =
+      normalized;
+
+    existing.confidence =
+      Math.max(
+        existing.confidence,
+        confidence
+      );
+
+    existing.source =
+      source;
+
+    existing.updatedAt =
+      now;
+
+    return profile;
+  }
+
+  profile.fields.push({
+    id: nexusId("profile"),
+    field,
+    value: normalized,
+    confidence,
+    source,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  return profile;
+};
+
+const nexusProfileRemoveField = (
+  profile: NexusUserProfile,
+  field: NexusProfileField
+): NexusUserProfile => {
+  profile.fields =
+    profile.fields.filter(
+      (item) =>
+        item.field !== field
+    );
+
+  return profile;
+};
+
+const nexusProfileAddLearning = (
+  profile: NexusUserProfile,
+  text: string,
+  signal: NexusLearningSignal,
+  confidence = 0.7
+): NexusLearningItem => {
+  const normalized =
+    nexusProfileNormalize(
+      text
+    );
+
+  const existing =
+    profile.learning.find(
+      (item) =>
+        item.text.toLowerCase() ===
+        normalized.toLowerCase()
+    );
+
+  const now =
+    new Date().toISOString();
+
+  if (existing) {
+    existing.occurrences += 1;
+
+    existing.confidence =
+      Math.min(
+        1,
+        Math.max(
+          existing.confidence,
+          confidence
+        ) + 0.05
+      );
+
+    existing.updatedAt =
+      now;
+
+    return existing;
+  }
+
+  const item: NexusLearningItem = {
+    id: nexusId("learning"),
+    text: normalized,
+    signal,
+    confidence,
+    occurrences: 1,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  profile.learning.push(
+    item
+  );
+
+  if (
+    profile.learning.length >
+    200
+  ) {
+    profile.learning =
+      profile.learning
+        .sort(
+          (a, b) =>
+            b.confidence -
+            a.confidence
+        )
+        .slice(0, 200);
+  }
+
+  return item;
+};
+
+const nexusProfileLearnFromMessage = (
+  profile: NexusUserProfile,
+  message: string
+): NexusUserProfile => {
+  const text =
+    nexusProfileNormalize(
+      message
+    );
+
+  if (!text) {
+    return profile;
+  }
+
+  const lower =
+    text.toLowerCase();
+
+  const namePatterns = [
+    /(?:меня зовут|моё имя|мое имя|я зовусь)\s+([а-яёa-z-]+)/i,
+    /(?:my name is|i am|i'm)\s+([a-z-]+)/i,
+  ];
+
+  for (const pattern of namePatterns) {
+    const match =
+      text.match(pattern);
+
+    if (match?.[1]) {
+      nexusProfileSetField(
+        profile,
+        "name",
+        match[1],
+        1,
+        "user"
+      );
+    }
+  }
+
+  const goalPatterns = [
+    /(?:моя цель|цель|хочу)\s+(.+)/i,
+    /(?:my goal is|i want to)\s+(.+)/i,
+  ];
+
+  for (const pattern of goalPatterns) {
+    const match =
+      text.match(pattern);
+
+    if (match?.[1]) {
+      nexusProfileAddLearning(
+        profile,
+        match[1],
+        "goal",
+        0.85
+      );
+    }
+  }
+
+  const projectPatterns = [
+    /(?:мой проект|моя программа|делаю проект)\s+(.+)/i,
+    /(?:my project|i'm building)\s+(.+)/i,
+  ];
+
+  for (const pattern of projectPatterns) {
+    const match =
+      text.match(pattern);
+
+    if (match?.[1]) {
+      nexusProfileAddLearning(
+        profile,
+        match[1],
+        "project",
+        0.9
+      );
+    }
+  }
+
+  const preferencePatterns = [
+    /(?:я люблю|мне нравится|мне не нравится|я предпочитаю)\s+(.+)/i,
+    /(?:i like|i don't like|i prefer)\s+(.+)/i,
+  ];
+
+  for (const pattern of preferencePatterns) {
+    const match =
+      text.match(pattern);
+
+    if (match?.[1]) {
+      nexusProfileAddLearning(
+        profile,
+        match[1],
+        "preference",
+        0.85
+      );
+    }
+  }
+
+  const correctionPatterns = [
+    /(?:нет,|не так,|исправь,|правильно:)\s*(.+)/i,
+    /(?:no,|not exactly,|correct:)\s*(.+)/i,
+  ];
+
+  for (const pattern of correctionPatterns) {
+    const match =
+      text.match(pattern);
+
+    if (match?.[1]) {
+      nexusProfileAddLearning(
+        profile,
+        match[1],
+        "correction",
+        0.95
+      );
+    }
+  }
+
+  const communicationPatterns = [
+    /(?:отвечай|пиши|говори)\s+(.+)/i,
+    /(?:answer|write|speak)\s+(.+)/i,
+  ];
+
+  for (const pattern of communicationPatterns) {
+    const match =
+      text.match(pattern);
+
+    if (match?.[1]) {
+      nexusProfileAddLearning(
+        profile,
+        match[1],
+        "communication",
+        0.9
+      );
+    }
+  }
+
+  if (
+    lower.includes("короче") ||
+    lower.includes("кратко") ||
+    lower.includes("без объяснений")
+  ) {
+    nexusProfileAddLearning(
+      profile,
+      "Пользователь предпочитает краткие ответы.",
+      "communication",
+      0.85
+    );
+  }
+
+  return profile;
+};
+
+const nexusProfileLearnFromCorrection = (
+  profile: NexusUserProfile,
+  correction: string
+): NexusLearningItem => {
+  return nexusProfileAddLearning(
+    profile,
+    correction,
+    "correction",
+    0.95
+  );
+};
+
+const nexusProfileLearnPreference = (
+  profile: NexusUserProfile,
+  preference: string
+): NexusLearningItem => {
+  return nexusProfileAddLearning(
+    profile,
+    preference,
+    "preference",
+    0.9
+  );
+};
+
+const nexusProfileLearnGoal = (
+  profile: NexusUserProfile,
+  goal: string
+): NexusLearningItem => {
+  return nexusProfileAddLearning(
+    profile,
+    goal,
+    "goal",
+    0.9
+  );
+};
+
+const nexusProfileLearnProject = (
+  profile: NexusUserProfile,
+  project: string
+): NexusLearningItem => {
+  return nexusProfileAddLearning(
+    profile,
+    project,
+    "project",
+    0.9
+  );
+};
+
+const nexusProfileLearnCommunication = (
+  profile: NexusUserProfile,
+  preference: string
+): NexusLearningItem => {
+  return nexusProfileAddLearning(
+    profile,
+    preference,
+    "communication",
+    0.9
+  );
+};
+
+const nexusProfileGetTopLearning = (
+  profile: NexusUserProfile,
+  limit = 20
+): NexusLearningItem[] => {
+  return profile.learning
+    .slice()
+    .sort(
+      (a, b) => {
+        const scoreA =
+          a.confidence *
+          Math.min(
+            a.occurrences,
+            10
+          );
+
+        const scoreB =
+          b.confidence *
+          Math.min(
+            b.occurrences,
+            10
+          );
+
+        return scoreB - scoreA;
+      }
+    )
+    .slice(
+      0,
+      Math.max(1, limit)
+    );
+};
+
+const nexusProfileSearchLearning = (
+  profile: NexusUserProfile,
+  query: string
+): NexusLearningItem[] => {
+  const normalized =
+    nexusProfileNormalize(
+      query
+    ).toLowerCase();
+
+  if (!normalized) {
+    return nexusProfileGetTopLearning(
+      profile
+    );
+  }
+
+  return profile.learning.filter(
+    (item) =>
+      item.text
+        .toLowerCase()
+        .includes(normalized)
+  );
+};
+
+const nexusProfileFormatForAI = (
+  profile: NexusUserProfile
+): string => {
+  const fields =
+    profile.fields
+      .map(
+        (item) =>
+          `${item.field}: ${item.value}`
+      )
+      .join("\n");
+
+  const learning =
+    nexusProfileGetTopLearning(
+      profile,
+      15
+    )
+      .map(
+        (item) =>
+          `- ${item.text}`
+      )
+      .join("\n");
+
+  return [
+    "ПРОФИЛЬ ПОЛЬЗОВАТЕЛЯ:",
+    fields ||
+      "Профиль пока пуст.",
+    "",
+    "ИЗУЧЕННЫЕ ПРЕДПОЧТЕНИЯ:",
+    learning ||
+      "Пока недостаточно данных.",
+  ].join("\n");
+};
+
+const nexusProfileToMemory = (
+  profile: NexusUserProfile
+): NexusMemoryItem[] => {
+  const result:
+    NexusMemoryItem[] = [];
+
+  for (const field of profile.fields) {
+    result.push({
+      id:
+        `profile-memory-${field.id}`,
+      category:
+        field.field === "goals"
+          ? "goal"
+          : field.field === "projects"
+          ? "project"
+          : "fact",
+      content:
+        `${field.field}: ${field.value}`,
+      importance:
+        Math.round(
+          field.confidence * 100
+        ),
+      createdAt:
+        field.createdAt,
+      updatedAt:
+        field.updatedAt,
+    });
+  }
+
+  for (const item of profile.learning) {
+    result.push({
+      id:
+        `learning-memory-${item.id}`,
+      category:
+        item.signal === "goal"
+          ? "goal"
+          : item.signal === "project"
+          ? "project"
+          : item.signal === "preference"
+          ? "preference"
+          : item.signal === "communication"
+          ? "preference"
+          : "fact",
+      content:
+        item.text,
+      importance:
+        Math.round(
+          item.confidence * 100
+        ),
+      createdAt:
+        item.createdAt,
+      updatedAt:
+        item.updatedAt,
+    });
+  }
+
+  return result;
+};
+
+const nexusProfileStats = (
+  profile: NexusUserProfile
+) => {
+  return {
+    fields:
+      profile.fields.length,
+    learning:
+      profile.learning.length,
+    highConfidence:
+      profile.learning.filter(
+        (item) =>
+          item.confidence >= 0.8
+      ).length,
+    repeated:
+      profile.learning.filter(
+        (item) =>
+          item.occurrences >= 2
+      ).length,
+  };
+};
+
+const nexusProfileExport = (
+  profile: NexusUserProfile
+): string => {
+  return JSON.stringify(
+    profile,
+    null,
+    2
+  );
+};
+
+const nexusProfileImport = (
+  value: string
+): NexusUserProfile | null => {
+  try {
+    const parsed =
+      JSON.parse(value);
+
+    if (
+      !parsed ||
+      typeof parsed !== "object"
+    ) {
+      return null;
+    }
+
+    return {
+      version:
+        Number(
+          parsed.version
+        ) ||
+        NEXUS_PROFILE_VERSION,
+      fields:
+        Array.isArray(
+          parsed.fields
+        )
+          ? parsed.fields
+          : [],
+      learning:
+        Array.isArray(
+          parsed.learning
+        )
+          ? parsed.learning
+          : [],
+    };
+  } catch {
+    return null;
+  }
+};
+
+const NEXUS_PROFILE_ENGINE = {
+  create: (): NexusUserProfile => ({
+    version:
+      NEXUS_PROFILE_VERSION,
+    fields: [],
+    learning: [],
+  }),
+
+  setField:
+    nexusProfileSetField,
+
+  removeField:
+    nexusProfileRemoveField,
+
+  findField:
+    nexusProfileFindField,
+
+  learn:
+    nexusProfileLearnFromMessage,
+
+  learnCorrection:
+    nexusProfileLearnFromCorrection,
+
+  learnPreference:
+    nexusProfileLearnPreference,
+
+  learnGoal:
+    nexusProfileLearnGoal,
+
+  learnProject:
+    nexusProfileLearnProject,
+
+  learnCommunication:
+    nexusProfileLearnCommunication,
+
+  topLearning:
+    nexusProfileGetTopLearning,
+
+  searchLearning:
+    nexusProfileSearchLearning,
+
+  formatForAI:
+    nexusProfileFormatForAI,
+
+  toMemory:
+    nexusProfileToMemory,
+
+  stats:
+    nexusProfileStats,
+
+  export:
+    nexusProfileExport,
+
+  import:
+    nexusProfileImport,
+};
+
+registerNexusModule({
+  id: "profile-engine",
+  name: "User Learning Engine",
+  description:
+    "Learns stable preferences, goals, projects and communication patterns from user interactions.",
+  version: NEXUS_VERSION,
+  enabled: true,
+});
