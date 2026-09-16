@@ -17839,3 +17839,2688 @@ registerNexusModule({
 /* =========================================================
    PART 26 COMPLETE
    ========================================================= */
+/* =========================================================
+   NEXUS — PART 27
+   TELEGRAM SYNC PREPARATION
+   ========================================================= */
+
+type NexusTelegramUser = {
+  id: string;
+  username: string | null;
+  firstName: string | null;
+  lastName: string | null;
+  languageCode: string | null;
+};
+
+type NexusTelegramMessage = {
+  id: string;
+  chatId: string;
+  userId: string;
+  text: string;
+  timestamp: number;
+};
+
+type NexusTelegramSyncStatus =
+  | "disconnected"
+  | "connecting"
+  | "connected"
+  | "syncing"
+  | "error";
+
+type NexusTelegramSyncDirection =
+  | "local_to_telegram"
+  | "telegram_to_local"
+  | "bidirectional";
+
+type NexusTelegramSyncConfig = {
+  enabled: boolean;
+  botUsername: string | null;
+  userId: string | null;
+  chatId: string | null;
+  direction: NexusTelegramSyncDirection;
+  syncMemory: boolean;
+  syncChats: boolean;
+  syncNotes: boolean;
+  syncTasks: boolean;
+  syncCalendar: boolean;
+  syncFiles: boolean;
+};
+
+type NexusTelegramSyncResult = {
+  success: boolean;
+  synced: number;
+  skipped: number;
+  errors: string[];
+  timestamp: number;
+};
+
+type NexusTelegramAdapter = {
+  connect: (
+    user: NexusTelegramUser
+  ) => Promise<boolean>;
+
+  disconnect: () => void;
+
+  sendMessage: (
+    chatId: string,
+    text: string
+  ) => Promise<boolean>;
+
+  receiveMessage: (
+    message: NexusTelegramMessage
+  ) => void;
+
+  getStatus: () =>
+    NexusTelegramSyncStatus;
+
+  configure: (
+    config: Partial<NexusTelegramSyncConfig>
+  ) => void;
+
+  getConfig: () =>
+    NexusTelegramSyncConfig;
+
+  exportPayload: () =>
+    NexusTelegramSyncPayload;
+
+  importPayload: (
+    payload: NexusTelegramSyncPayload
+  ) => NexusTelegramSyncResult;
+};
+
+type NexusTelegramSyncPayload = {
+  version: 1;
+  exportedAt: number;
+  user: NexusTelegramUser | null;
+  state: NexusAppSnapshot;
+};
+
+/* -------------------------
+   DEFAULT CONFIG
+   ------------------------- */
+
+const nexusTelegramDefaultConfig:
+  NexusTelegramSyncConfig = {
+  enabled: false,
+  botUsername: null,
+  userId: null,
+  chatId: null,
+  direction:
+    "bidirectional",
+  syncMemory: true,
+  syncChats: true,
+  syncNotes: true,
+  syncTasks: true,
+  syncCalendar: true,
+  syncFiles: false
+};
+
+let nexusTelegramConfig =
+  nexusClone(
+    nexusTelegramDefaultConfig
+  );
+
+let nexusTelegramStatus:
+  NexusTelegramSyncStatus =
+  "disconnected";
+
+let nexusTelegramUser:
+  NexusTelegramUser | null =
+  null;
+
+const nexusTelegramMessages:
+  NexusTelegramMessage[] =
+  [];
+
+/* -------------------------
+   TELEGRAM ADAPTER
+   ------------------------- */
+
+const nexusTelegramConnect =
+  async (
+    user: NexusTelegramUser
+  ): Promise<boolean> => {
+    nexusTelegramStatus =
+      "connecting";
+
+    try {
+      nexusTelegramUser =
+        nexusClone(user);
+
+      nexusTelegramConfig = {
+        ...nexusTelegramConfig,
+        enabled: true,
+        userId:
+          user.id
+      };
+
+      nexusTelegramStatus =
+        "connected";
+
+      nexusEmitEvent(
+        "app.ready",
+        {
+          integration:
+            "telegram",
+          userId:
+            user.id
+        },
+        "telegram-adapter"
+      );
+
+      return true;
+    } catch {
+      nexusTelegramStatus =
+        "error";
+
+      return false;
+    }
+  };
+
+const nexusTelegramDisconnect =
+  () => {
+    nexusTelegramStatus =
+      "disconnected";
+
+    nexusTelegramUser =
+      null;
+
+    nexusTelegramConfig = {
+      ...nexusTelegramConfig,
+      enabled: false
+    };
+  };
+
+/* -------------------------
+   CONFIGURATION
+   ------------------------- */
+
+const nexusTelegramConfigure = (
+  config: Partial<NexusTelegramSyncConfig>
+) => {
+  nexusTelegramConfig = {
+    ...nexusTelegramConfig,
+    ...config
+  };
+
+  nexusEmitEvent(
+    "settings.changed",
+    {
+      source:
+        "telegram",
+      config:
+        nexusClone(
+          nexusTelegramConfig
+        )
+    },
+    "telegram-adapter"
+  );
+};
+
+const nexusTelegramGetConfig =
+  (): NexusTelegramSyncConfig =>
+    nexusClone(
+      nexusTelegramConfig
+    );
+
+const nexusTelegramGetStatus =
+  (): NexusTelegramSyncStatus =>
+    nexusTelegramStatus;
+
+/* -------------------------
+   MESSAGE BUFFER
+   ------------------------- */
+
+const nexusTelegramSendMessage =
+  async (
+    chatId: string,
+    text: string
+  ): Promise<boolean> => {
+    if (
+      !chatId ||
+      !text.trim()
+    ) {
+      return false;
+    }
+
+    /*
+     * Real Telegram API calls will be connected
+     * through the backend/bot layer later.
+     *
+     * The client never stores a Telegram bot token.
+     */
+
+    nexusEmitEvent(
+      "chat.message",
+      {
+        direction:
+          "local_to_telegram",
+        chatId,
+        text
+      },
+      "telegram-adapter"
+    );
+
+    return true;
+  };
+
+const nexusTelegramReceiveMessage =
+  (
+    message: NexusTelegramMessage
+  ) => {
+    nexusTelegramMessages.push(
+      nexusClone(message)
+    );
+
+    nexusEmitEvent(
+      "chat.message",
+      {
+        direction:
+          "telegram_to_local",
+        message:
+          nexusClone(message)
+      },
+      "telegram-adapter"
+    );
+  };
+
+const nexusTelegramGetMessages =
+  (): NexusTelegramMessage[] =>
+    nexusClone(
+      nexusTelegramMessages
+    );
+
+/* -------------------------
+   PAYLOAD CREATION
+   ------------------------- */
+
+const nexusTelegramExportPayload =
+  (): NexusTelegramSyncPayload => {
+    const state =
+      nexusStateGet();
+
+    const payload: NexusTelegramSyncPayload =
+      {
+        version: 1,
+        exportedAt:
+          Date.now(),
+        user:
+          nexusTelegramUser
+            ? nexusClone(
+                nexusTelegramUser
+              )
+            : null,
+        state:
+          nexusClone(state)
+      };
+
+    return payload;
+  };
+
+/* -------------------------
+   MERGE HELPERS
+   ------------------------- */
+
+const nexusMergeById = <
+  T extends {
+    id: string;
+  }
+>(
+  local: T[],
+  incoming: T[]
+): {
+  data: T[];
+  added: number;
+  updated: number;
+} => {
+  const map =
+    new Map<string, T>();
+
+  local.forEach(
+    (item) =>
+      map.set(
+        item.id,
+        nexusClone(item)
+      )
+  );
+
+  let added = 0;
+  let updated = 0;
+
+  incoming.forEach(
+    (item) => {
+      if (
+        map.has(item.id)
+      ) {
+        updated++;
+      } else {
+        added++;
+      }
+
+      map.set(
+        item.id,
+        nexusClone(item)
+      );
+    }
+  );
+
+  return {
+    data:
+      Array.from(
+        map.values()
+      ),
+    added,
+    updated
+  };
+};
+
+/* -------------------------
+   IMPORT / SYNC
+   ------------------------- */
+
+const nexusTelegramImportPayload =
+  (
+    payload: NexusTelegramSyncPayload
+  ): NexusTelegramSyncResult => {
+    const result: NexusTelegramSyncResult =
+      {
+        success: false,
+        synced: 0,
+        skipped: 0,
+        errors: [],
+        timestamp:
+          Date.now()
+      };
+
+    if (
+      !payload ||
+      payload.version !== 1 ||
+      !payload.state
+    ) {
+      result.errors.push(
+        "Некорректный Telegram payload."
+      );
+
+      return result;
+    }
+
+    nexusTelegramStatus =
+      "syncing";
+
+    try {
+      const local =
+        nexusStateGet();
+
+      const incoming =
+        payload.state;
+
+      if (
+        nexusTelegramConfig
+          .syncChats
+      ) {
+        const merged =
+          nexusMergeById(
+            local.chats,
+            incoming.chats
+          );
+
+        local.chats =
+          merged.data;
+
+        result.synced +=
+          merged.added +
+          merged.updated;
+      }
+
+      if (
+        nexusTelegramConfig
+          .syncMemory
+      ) {
+        const merged =
+          nexusMergeById(
+            local.memory,
+            incoming.memory
+          );
+
+        local.memory =
+          merged.data;
+
+        result.synced +=
+          merged.added +
+          merged.updated;
+      }
+
+      if (
+        nexusTelegramConfig
+          .syncNotes
+      ) {
+        const merged =
+          nexusMergeById(
+            local.notes,
+            incoming.notes
+          );
+
+        local.notes =
+          merged.data;
+
+        result.synced +=
+          merged.added +
+          merged.updated;
+      }
+
+      if (
+        nexusTelegramConfig
+          .syncTasks
+      ) {
+        const merged =
+          nexusMergeById(
+            local.tasks,
+            incoming.tasks
+          );
+
+        local.tasks =
+          merged.data;
+
+        result.synced +=
+          merged.added +
+          merged.updated;
+      }
+
+      if (
+        nexusTelegramConfig
+          .syncCalendar
+      ) {
+        const merged =
+          nexusMergeById(
+            local.events,
+            incoming.events
+          );
+
+        local.events =
+          merged.data;
+
+        result.synced +=
+          merged.added +
+          merged.updated;
+      }
+
+      if (
+        nexusTelegramConfig
+          .syncFiles
+      ) {
+        const merged =
+          nexusMergeById(
+            local.files,
+            incoming.files
+          );
+
+        local.files =
+          merged.data;
+
+        result.synced +=
+          merged.added +
+          merged.updated;
+      }
+
+      nexusStateSet(local);
+      nexusStateSave();
+
+      nexusTelegramStatus =
+        "connected";
+
+      result.success =
+        true;
+
+      nexusEmitEvent(
+        "app.ready",
+        {
+          integration:
+            "telegram",
+          synced:
+            result.synced
+        },
+        "telegram-adapter"
+      );
+
+      return result;
+    } catch (error) {
+      nexusTelegramStatus =
+        "error";
+
+      result.errors.push(
+        error instanceof Error
+          ? error.message
+          : String(error)
+      );
+
+      return result;
+    }
+  };
+
+/* -------------------------
+   TELEGRAM COMMAND BRIDGE
+   ------------------------- */
+
+type NexusTelegramCommandResult = {
+  handled: boolean;
+  command: string | null;
+  args: string[];
+  response: string | null;
+};
+
+const nexusParseTelegramCommand =
+  (
+    text: string
+  ): {
+    command: string | null;
+    args: string[];
+  } => {
+    const clean =
+      text.trim();
+
+    if (
+      !clean.startsWith("/")
+    ) {
+      return {
+        command: null,
+        args: []
+      };
+    }
+
+    const parts =
+      clean
+        .slice(1)
+        .split(/\s+/)
+        .filter(Boolean);
+
+    if (
+      parts.length === 0
+    ) {
+      return {
+        command: null,
+        args: []
+      };
+    }
+
+    return {
+      command:
+        parts[0]
+          .toLowerCase(),
+      args:
+        parts.slice(1)
+    };
+  };
+
+const nexusHandleTelegramCommand =
+  async (
+    text: string
+  ): Promise<NexusTelegramCommandResult> => {
+    const parsed =
+      nexusParseTelegramCommand(
+        text
+      );
+
+    if (!parsed.command) {
+      return {
+        handled: false,
+        command: null,
+        args: [],
+        response: null
+      };
+    }
+
+    switch (
+      parsed.command
+    ) {
+      case "start":
+        return {
+          handled: true,
+          command:
+            parsed.command,
+          args:
+            parsed.args,
+          response:
+            "NEXUS подключён. Готов к работе."
+        };
+
+      case "help":
+        return {
+          handled: true,
+          command:
+            parsed.command,
+          args:
+            parsed.args,
+          response:
+            nexusDescribeAIActions()
+        };
+
+      case "status": {
+        const stats =
+          nexusStateStatistics();
+
+        return {
+          handled: true,
+          command:
+            parsed.command,
+          args:
+            parsed.args,
+          response:
+            `NEXUS: ${stats.chats} чатов, ${stats.messages} сообщений, ${stats.tasks} задач, ${stats.notes} заметок.`
+        };
+      }
+
+      case "sync": {
+        const payload =
+          nexusTelegramExportPayload();
+
+        return {
+          handled: true,
+          command:
+            parsed.command,
+          args:
+            parsed.args,
+          response:
+            `Состояние подготовлено для синхронизации. Версия: ${payload.version}.`
+        };
+      }
+
+      default:
+        return {
+          handled: false,
+          command:
+            parsed.command,
+          args:
+            parsed.args,
+          response: null
+        };
+    }
+  };
+
+/* -------------------------
+   TELEGRAM ADAPTER OBJECT
+   ------------------------- */
+
+const NEXUS_TELEGRAM_ADAPTER:
+  NexusTelegramAdapter = {
+  connect:
+    nexusTelegramConnect,
+
+  disconnect:
+    nexusTelegramDisconnect,
+
+  sendMessage:
+    nexusTelegramSendMessage,
+
+  receiveMessage:
+    nexusTelegramReceiveMessage,
+
+  getStatus:
+    nexusTelegramGetStatus,
+
+  configure:
+    nexusTelegramConfigure,
+
+  getConfig:
+    nexusTelegramGetConfig,
+
+  exportPayload:
+    nexusTelegramExportPayload,
+
+  importPayload:
+    nexusTelegramImportPayload
+};
+
+registerNexusModule({
+  id: "telegram-adapter",
+  name: "NEXUS Telegram Adapter",
+  version: "1.0.0",
+  description:
+    "Подготовка NEXUS к синхронизации с существующим Telegram-ботом.",
+  enabled: true
+});
+
+/* =========================================================
+   PART 27 COMPLETE
+   ========================================================= */
+/* =========================================================
+   NEXUS — PART 28
+   BACKEND API BRIDGE
+   ========================================================= */
+
+type NexusAPIRequestMethod =
+  | "GET"
+  | "POST"
+  | "PUT"
+  | "PATCH"
+  | "DELETE";
+
+type NexusAPIRequest = {
+  endpoint: string;
+  method: NexusAPIRequestMethod;
+  body?: Record<string, unknown>;
+  headers?: Record<string, string>;
+  timeout?: number;
+};
+
+type NexusAPIResponse<T = unknown> = {
+  success: boolean;
+  status: number;
+  data: T | null;
+  error: string | null;
+  duration: number;
+};
+
+type NexusBackendConfig = {
+  baseUrl: string;
+  timeout: number;
+  enabled: boolean;
+};
+
+type NexusAIBackendRequest = {
+  message: string;
+  conversation: NexusMessage[];
+  context?: string;
+  instructions?: string;
+};
+
+type NexusAIBackendResponse = {
+  text: string;
+  model: string | null;
+  requestId: string | null;
+  usage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    totalTokens?: number;
+  };
+};
+
+const nexusBackendConfig:
+  NexusBackendConfig = {
+  baseUrl: "/api",
+  timeout: 30000,
+  enabled: true
+};
+
+/* -------------------------
+   REQUEST ID
+   ------------------------- */
+
+const nexusCreateRequestId =
+  (): string =>
+    `req_${Date.now()}_${Math.random()
+      .toString(36)
+      .slice(2, 10)}`;
+
+/* -------------------------
+   CONFIG
+   ------------------------- */
+
+const nexusBackendConfigure = (
+  config: Partial<NexusBackendConfig>
+) => {
+  Object.assign(
+    nexusBackendConfig,
+    config
+  );
+};
+
+const nexusBackendGetConfig =
+  (): NexusBackendConfig =>
+    nexusClone(
+      nexusBackendConfig
+    );
+
+/* -------------------------
+   GENERIC API REQUEST
+   ------------------------- */
+
+const nexusBackendRequest = async <
+  T = unknown
+>(
+  request: NexusAPIRequest
+): Promise<
+  NexusAPIResponse<T>
+> => {
+  const startedAt =
+    Date.now();
+
+  if (
+    !nexusBackendConfig.enabled
+  ) {
+    return {
+      success: false,
+      status: 0,
+      data: null,
+      error:
+        "Backend отключён.",
+      duration:
+        Date.now() -
+        startedAt
+    };
+  }
+
+  const controller =
+    typeof AbortController !==
+    "undefined"
+      ? new AbortController()
+      : null;
+
+  let timeoutId:
+    ReturnType<
+      typeof setTimeout
+    > | null = null;
+
+  if (
+    controller &&
+    nexusBackendConfig.timeout >
+      0
+  ) {
+    timeoutId =
+      setTimeout(
+        () =>
+          controller.abort(),
+        nexusBackendConfig.timeout
+      );
+  }
+
+  const headers: Record<
+    string,
+    string
+  > = {
+    "Content-Type":
+      "application/json",
+    "X-NEXUS-Client":
+      "web"
+  };
+
+  Object.assign(
+    headers,
+    request.headers ?? {}
+  );
+
+  try {
+    const endpoint =
+      request.endpoint.startsWith(
+        "http"
+      )
+        ? request.endpoint
+        : `${nexusBackendConfig.baseUrl}${request.endpoint.startsWith("/") ? "" : "/"}${request.endpoint}`;
+
+    const response =
+      await fetch(
+        endpoint,
+        {
+          method:
+            request.method,
+          headers,
+          body:
+            request.method ===
+              "GET" ||
+            request.method ===
+              "DELETE"
+              ? undefined
+              : JSON.stringify(
+                  request.body ??
+                    {}
+                ),
+          signal:
+            controller?.signal
+        }
+      );
+
+    let data:
+      T | null = null;
+
+    try {
+      data =
+        (await response.json()) as T;
+    } catch {
+      data = null;
+    }
+
+    if (!response.ok) {
+      return {
+        success: false,
+        status:
+          response.status,
+        data,
+        error:
+          `HTTP ${response.status}`,
+        duration:
+          Date.now() -
+          startedAt
+      };
+    }
+
+    return {
+      success: true,
+      status:
+        response.status,
+      data,
+      error: null,
+      duration:
+        Date.now() -
+        startedAt
+    };
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : String(error);
+
+    return {
+      success: false,
+      status: 0,
+      data: null,
+      error: message,
+      duration:
+        Date.now() -
+        startedAt
+    };
+  } finally {
+    if (timeoutId) {
+      clearTimeout(
+        timeoutId
+      );
+    }
+  }
+};
+
+/* -------------------------
+   HEALTH CHECK
+   ------------------------- */
+
+const nexusBackendHealth =
+  async (): Promise<
+    NexusAPIResponse
+  > =>
+    nexusBackendRequest({
+      endpoint:
+        "/health",
+      method: "GET",
+      timeout: 5000
+    });
+
+/* -------------------------
+   AI REQUEST
+   ------------------------- */
+
+const nexusBackendAIRequest =
+  async (
+    request: NexusAIBackendRequest
+  ): Promise<
+    NexusAPIResponse<NexusAIBackendResponse>
+  > => {
+    const requestId =
+      nexusCreateRequestId();
+
+    nexusEmitEvent(
+      "ai.request",
+      {
+        requestId,
+        message:
+          request.message
+      },
+      "backend-bridge"
+    );
+
+    const response =
+      await nexusBackendRequest<NexusAIBackendResponse>(
+        {
+          endpoint:
+            "/chat",
+          method:
+            "POST",
+          body: {
+            requestId,
+            message:
+              request.message,
+            conversation:
+              request.conversation,
+            context:
+              request.context ??
+              "",
+            instructions:
+              request.instructions ??
+              ""
+          }
+        }
+      );
+
+    if (
+      response.success &&
+      response.data
+    ) {
+      nexusEmitEvent(
+        "ai.response",
+        {
+          requestId,
+          text:
+            response.data.text
+        },
+        "backend-bridge"
+      );
+    }
+
+    return response;
+  };
+
+/* -------------------------
+   MEMORY API
+   ------------------------- */
+
+const nexusBackendSaveMemory =
+  async (
+    item: NexusMemoryItem
+  ) =>
+    nexusBackendRequest({
+      endpoint:
+        "/memory",
+      method:
+        "POST",
+      body: {
+        item
+      }
+    });
+
+const nexusBackendDeleteMemory =
+  async (
+    id: string
+  ) =>
+    nexusBackendRequest({
+      endpoint:
+        `/memory/${encodeURIComponent(
+          id
+        )}`,
+      method:
+        "DELETE"
+    });
+
+/* -------------------------
+   SYNC API
+   ------------------------- */
+
+const nexusBackendSync =
+  async (
+    payload: NexusTelegramSyncPayload
+  ) =>
+    nexusBackendRequest({
+      endpoint:
+        "/sync",
+      method:
+        "POST",
+      body: {
+        payload
+      }
+    });
+
+const nexusBackendDownloadState =
+  async (): Promise<
+    NexusAPIResponse<NexusTelegramSyncPayload>
+  > =>
+    nexusBackendRequest<NexusTelegramSyncPayload>(
+      {
+        endpoint:
+          "/sync",
+        method:
+          "GET"
+      }
+    );
+
+/* -------------------------
+   TELEGRAM API BRIDGE
+   ------------------------- */
+
+const nexusBackendTelegramSend =
+  async (
+    chatId: string,
+    text: string
+  ) =>
+    nexusBackendRequest({
+      endpoint:
+        "/telegram/send",
+      method:
+        "POST",
+      body: {
+        chatId,
+        text
+      }
+    });
+
+const nexusBackendTelegramStatus =
+  async () =>
+    nexusBackendRequest({
+      endpoint:
+        "/telegram/status",
+      method:
+        "GET"
+    });
+
+/* -------------------------
+   OFFLINE QUEUE
+   ------------------------- */
+
+type NexusQueuedRequest = {
+  id: string;
+  request: NexusAPIRequest;
+  createdAt: number;
+  attempts: number;
+};
+
+const nexusBackendQueue:
+  NexusQueuedRequest[] =
+  [];
+
+const nexusQueueRequest = (
+  request: NexusAPIRequest
+): NexusQueuedRequest => {
+  const queued: NexusQueuedRequest =
+    {
+      id:
+        nexusCreateRequestId(),
+      request:
+        nexusClone(request),
+      createdAt:
+        Date.now(),
+      attempts: 0
+    };
+
+  nexusBackendQueue.push(
+    queued
+  );
+
+  return queued;
+};
+
+const nexusGetQueuedRequests =
+  (): NexusQueuedRequest[] =>
+    nexusClone(
+      nexusBackendQueue
+    );
+
+const nexusRemoveQueuedRequest = (
+  id: string
+): boolean => {
+  const index =
+    nexusBackendQueue.findIndex(
+      (item) =>
+        item.id === id
+    );
+
+  if (index === -1) {
+    return false;
+  }
+
+  nexusBackendQueue.splice(
+    index,
+    1
+  );
+
+  return true;
+};
+
+const nexusProcessBackendQueue =
+  async (): Promise<{
+    processed: number;
+    failed: number;
+  }> => {
+    let processed = 0;
+    let failed = 0;
+
+    for (
+      const item of [
+        ...nexusBackendQueue
+      ]
+    ) {
+      item.attempts++;
+
+      const result =
+        await nexusBackendRequest(
+          item.request
+        );
+
+      if (result.success) {
+        nexusRemoveQueuedRequest(
+          item.id
+        );
+
+        processed++;
+      } else {
+        failed++;
+      }
+    }
+
+    return {
+      processed,
+      failed
+    };
+  };
+
+/* -------------------------
+   RETRY WRAPPER
+   ------------------------- */
+
+const nexusBackendRequestWithRetry =
+  async <
+    T = unknown
+  >(
+    request: NexusAPIRequest,
+    retries = 2
+  ): Promise<
+    NexusAPIResponse<T>
+  > => {
+    let lastResult:
+      NexusAPIResponse<T> = {
+      success: false,
+      status: 0,
+      data: null,
+      error:
+        "Request failed.",
+      duration: 0
+    };
+
+    for (
+      let attempt = 0;
+      attempt <= retries;
+      attempt++
+    ) {
+      lastResult =
+        await nexusBackendRequest<T>(
+          request
+        );
+
+      if (
+        lastResult.success
+      ) {
+        return lastResult;
+      }
+
+      if (
+        attempt < retries
+      ) {
+        await new Promise(
+          (resolve) =>
+            setTimeout(
+              resolve,
+              500 *
+                (attempt + 1)
+            )
+        );
+      }
+    }
+
+    return lastResult;
+  };
+
+/* -------------------------
+   BACKEND MANAGER
+   ------------------------- */
+
+const NEXUS_BACKEND:
+  {
+    configure: typeof nexusBackendConfigure;
+    config: typeof nexusBackendGetConfig;
+    request: typeof nexusBackendRequest;
+    requestWithRetry: typeof nexusBackendRequestWithRetry;
+    health: typeof nexusBackendHealth;
+    ai: typeof nexusBackendAIRequest;
+    saveMemory: typeof nexusBackendSaveMemory;
+    deleteMemory: typeof nexusBackendDeleteMemory;
+    sync: typeof nexusBackendSync;
+    downloadState: typeof nexusBackendDownloadState;
+    telegramSend: typeof nexusBackendTelegramSend;
+    telegramStatus: typeof nexusBackendTelegramStatus;
+    queue: typeof nexusQueueRequest;
+    queued: typeof nexusGetQueuedRequests;
+    processQueue: typeof nexusProcessBackendQueue;
+  } = {
+  configure:
+    nexusBackendConfigure,
+
+  config:
+    nexusBackendGetConfig,
+
+  request:
+    nexusBackendRequest,
+
+  requestWithRetry:
+    nexusBackendRequestWithRetry,
+
+  health:
+    nexusBackendHealth,
+
+  ai:
+    nexusBackendAIRequest,
+
+  saveMemory:
+    nexusBackendSaveMemory,
+
+  deleteMemory:
+    nexusBackendDeleteMemory,
+
+  sync:
+    nexusBackendSync,
+
+  downloadState:
+    nexusBackendDownloadState,
+
+  telegramSend:
+    nexusBackendTelegramSend,
+
+  telegramStatus:
+    nexusBackendTelegramStatus,
+
+  queue:
+    nexusQueueRequest,
+
+  queued:
+    nexusGetQueuedRequests,
+
+  processQueue:
+    nexusProcessBackendQueue
+  };
+
+registerNexusModule({
+  id: "backend-bridge",
+  name: "NEXUS Backend API Bridge",
+  version: "1.0.0",
+  description:
+    "Связь клиентского NEXUS с серверным API, AI, памятью и Telegram.",
+  enabled: true
+});
+
+/* =========================================================
+   PART 28 COMPLETE
+   ========================================================= */
+/* =========================================================
+   NEXUS — PART 29
+   AI CONVERSATION ORCHESTRATOR
+   ========================================================= */
+
+type NexusConversationMode =
+  | "local"
+  | "backend"
+  | "hybrid";
+
+type NexusConversationRequest = {
+  message: string;
+  chatId?: string;
+  mode?: NexusConversationMode;
+  useMemory?: boolean;
+  useStyle?: boolean;
+  useActions?: boolean;
+};
+
+type NexusConversationResult = {
+  success: boolean;
+  text: string;
+  mode: NexusConversationMode;
+  actionExecuted: boolean;
+  actionResult: unknown | null;
+  requestId: string;
+  error: string | null;
+};
+
+type NexusConversationContext = {
+  message: string;
+  chat: NexusChat | null;
+  memories: NexusMemoryItem[];
+  notes: NexusNote[];
+  tasks: NexusTask[];
+  events: NexusCalendarEvent[];
+  timers: NexusTimer[];
+  styleInstruction: string;
+};
+
+const nexusConversationHistory:
+  NexusConversationResult[] = [];
+
+const nexusConversationHistoryLimit =
+  100;
+
+/* -------------------------
+   CONTEXT BUILDER
+   ------------------------- */
+
+const nexusBuildConversationContext =
+  (
+    request: NexusConversationRequest
+  ): NexusConversationContext => {
+    const state =
+      nexusStateGet();
+
+    let chat:
+      NexusChat | null = null;
+
+    if (request.chatId) {
+      chat =
+        state.chats.find(
+          (item) =>
+            item.id ===
+            request.chatId
+        ) ?? null;
+    }
+
+    let memories =
+      state.memory;
+
+    if (
+      request.useMemory !== false
+    ) {
+      const normalized =
+        request.message
+          .toLowerCase()
+          .trim();
+
+      memories =
+        state.memory.filter(
+          (item) =>
+            item.text
+              .toLowerCase()
+              .includes(
+                normalized
+              ) ||
+            normalized
+              .split(/\s+/)
+              .some(
+                (word) =>
+                  word.length >
+                    2 &&
+                  item.text
+                    .toLowerCase()
+                    .includes(
+                      word
+                    )
+              )
+        );
+
+      if (
+        memories.length === 0
+      ) {
+        memories =
+          state.memory.slice(
+            -20
+          );
+      }
+    } else {
+      memories = [];
+    }
+
+    let styleInstruction =
+      "";
+
+    if (
+      request.useStyle !==
+      false
+    ) {
+      try {
+        const style =
+          nexusStyleGetProfile();
+
+        if (style) {
+          styleInstruction =
+            nexusBuildStyleInstruction(
+              style
+            );
+        }
+      } catch {
+        styleInstruction =
+          "";
+      }
+    }
+
+    return {
+      message:
+        request.message,
+
+      chat,
+
+      memories:
+        memories.slice(
+          -30
+        ),
+
+      notes:
+        state.notes.slice(
+          -20
+        ),
+
+      tasks:
+        state.tasks.slice(
+          -20
+        ),
+
+      events:
+        state.events.slice(
+          -20
+        ),
+
+      timers:
+        state.timers.slice(
+          -10
+        ),
+
+      styleInstruction
+    };
+  };
+
+/* -------------------------
+   CONTEXT TEXT
+   ------------------------- */
+
+const nexusContextToText =
+  (
+    context: NexusConversationContext
+  ): string => {
+    const sections: string[] =
+      [];
+
+    if (
+      context.memories.length
+    ) {
+      sections.push(
+        "ПАМЯТЬ:\n" +
+          context.memories
+            .map(
+              (item) =>
+                `- ${item.text}`
+            )
+            .join("\n")
+      );
+    }
+
+    if (
+      context.notes.length
+    ) {
+      sections.push(
+        "ЗАМЕТКИ:\n" +
+          context.notes
+            .map(
+              (note) =>
+                `- ${note.title}: ${note.content}`
+            )
+            .join("\n")
+      );
+    }
+
+    if (
+      context.tasks.length
+    ) {
+      sections.push(
+        "ЗАДАЧИ:\n" +
+          context.tasks
+            .map(
+              (task) =>
+                `- ${task.title} — ${
+                  task.completed
+                    ? "выполнено"
+                    : "активна"
+                }`
+            )
+            .join("\n")
+      );
+    }
+
+    if (
+      context.events.length
+    ) {
+      sections.push(
+        "КАЛЕНДАРЬ:\n" +
+          context.events
+            .map(
+              (event) =>
+                `- ${event.date} ${event.time}: ${event.title}`
+            )
+            .join("\n")
+      );
+    }
+
+    if (
+      context.timers.length
+    ) {
+      sections.push(
+        "ТАЙМЕРЫ:\n" +
+          context.timers
+            .map(
+              (timer) =>
+                `- ${timer.name}: ${timer.remaining} сек.`
+            )
+            .join("\n")
+      );
+    }
+
+    if (
+      context.styleInstruction
+    ) {
+      sections.push(
+        "СТИЛЬ ПОЛЬЗОВАТЕЛЯ:\n" +
+          context.styleInstruction
+      );
+    }
+
+    return sections.join(
+      "\n\n"
+    );
+  };
+
+/* -------------------------
+   MODE SELECTION
+   ------------------------- */
+
+const nexusSelectConversationMode =
+  (
+    request: NexusConversationRequest
+  ): NexusConversationMode => {
+    if (
+      request.mode
+    ) {
+      return request.mode;
+    }
+
+    if (
+      typeof window ===
+      "undefined"
+    ) {
+      return "backend";
+    }
+
+    if (
+      nexusBackendGetConfig()
+        .enabled
+    ) {
+      return "hybrid";
+    }
+
+    return "local";
+  };
+
+/* -------------------------
+   ACTION DETECTION
+   ------------------------- */
+
+const nexusDetectConversationAction =
+  (
+    message: string
+  ): NexusAIActionRequest | null => {
+    if (
+      !message.trim()
+    ) {
+      return null;
+    }
+
+    return nexusParseAIActionCommand(
+      message
+    );
+  };
+
+/* -------------------------
+   LOCAL RESPONSE
+   ------------------------- */
+
+const nexusGenerateConversationFallback =
+  (
+    message: string,
+    context: NexusConversationContext
+  ): string => {
+    const lower =
+      message
+        .toLowerCase()
+        .trim();
+
+    if (
+      /^(привет|здравствуй|здравствуйте|хай|hello|hi)\b/.test(
+        lower
+      )
+    ) {
+      return "Привет! Я NEXUS. Чем займёмся?";
+    }
+
+    if (
+      lower.includes(
+        "который час"
+      ) ||
+      lower.includes(
+        "сколько времени"
+      )
+    ) {
+      return `Сейчас ${new Date().toLocaleTimeString(
+        "ru-RU",
+        {
+          hour: "2-digit",
+          minute: "2-digit"
+        }
+      )}.`;
+    }
+
+    if (
+      lower.includes(
+        "какая сегодня дата"
+      ) ||
+      lower.includes(
+        "какое сегодня число"
+      )
+    ) {
+      return `Сегодня ${new Date().toLocaleDateString(
+        "ru-RU"
+      )}.`;
+    }
+
+    if (
+      lower.includes(
+        "что ты помнишь"
+      )
+    ) {
+      if (
+        context.memories.length ===
+        0
+      ) {
+        return "Пока в памяти ничего подходящего нет.";
+      }
+
+      return (
+        "Вот что я нашёл в памяти:\n" +
+        context.memories
+          .slice(-10)
+          .map(
+            (item) =>
+              `• ${item.text}`
+          )
+          .join("\n")
+      );
+    }
+
+    if (
+      lower.includes(
+        "мои задачи"
+      )
+    ) {
+      const active =
+        context.tasks.filter(
+          (task) =>
+            !task.completed
+        );
+
+      if (
+        active.length === 0
+      ) {
+        return "Активных задач сейчас нет.";
+      }
+
+      return (
+        "Активные задачи:\n" +
+        active
+          .slice(0, 10)
+          .map(
+            (task) =>
+              `• ${task.title}`
+          )
+          .join("\n")
+      );
+    }
+
+    if (
+      lower.includes(
+        "мои заметки"
+      )
+    ) {
+      if (
+        context.notes.length ===
+        0
+      ) {
+        return "Заметок пока нет.";
+      }
+
+      return (
+        "Последние заметки:\n" +
+        context.notes
+          .slice(-10)
+          .map(
+            (note) =>
+              `• ${note.title}`
+          )
+          .join("\n")
+      );
+    }
+
+    return (
+      "Я понял сообщение. " +
+      "Сейчас локальный режим может ответить не на все запросы, " +
+      "а серверный AI подключается через backend."
+    );
+  };
+
+/* -------------------------
+   BACKEND RESPONSE
+   ------------------------- */
+
+const nexusTryBackendConversation =
+  async (
+    request: NexusConversationRequest,
+    context: NexusConversationContext
+  ): Promise<
+    NexusAPIResponse<NexusAIBackendResponse>
+  > => {
+    if (
+      !nexusBackendGetConfig()
+        .enabled
+    ) {
+      return {
+        success: false,
+        status: 0,
+        data: null,
+        error:
+          "Backend disabled.",
+        duration: 0
+      };
+    }
+
+    const conversation =
+      context.chat?.messages ??
+      [];
+
+    const contextText =
+      nexusContextToText(
+        context
+      );
+
+    return nexusBackendAIRequest({
+      message:
+        request.message,
+
+      conversation:
+        conversation as NexusMessage[],
+
+      context:
+        contextText,
+
+      instructions:
+        [
+          "Ты NEXUS — персональный AI-помощник.",
+          "Отвечай естественно.",
+          "Адаптируй стиль общения под пользователя.",
+          "Не придумывай факты о пользователе.",
+          context.styleInstruction
+        ]
+          .filter(Boolean)
+          .join("\n")
+    });
+  };
+
+/* -------------------------
+   MAIN CONVERSATION ENGINE
+   ------------------------- */
+
+const nexusProcessConversation =
+  async (
+    request: NexusConversationRequest
+  ): Promise<NexusConversationResult> => {
+    const requestId =
+      nexusCreateRequestId();
+
+    const mode =
+      nexusSelectConversationMode(
+        request
+      );
+
+    const context =
+      nexusBuildConversationContext(
+        request
+      );
+
+    nexusEmitEvent(
+      "ai.request",
+      {
+        requestId,
+        message:
+          request.message,
+        mode
+      },
+      "conversation-orchestrator"
+    );
+
+    let actionExecuted =
+      false;
+
+    let actionResult:
+      unknown | null = null;
+
+    if (
+      request.useActions !==
+      false
+    ) {
+      const action =
+        nexusDetectConversationAction(
+          request.message
+        );
+
+      if (action) {
+        const result =
+          await nexusExecuteAIAction(
+            action
+          );
+
+        actionExecuted =
+          result.success;
+
+        actionResult =
+          result.execution;
+
+        if (
+          result.success
+        ) {
+          const text =
+            `Готово. ${result.message}`;
+
+          const finalResult:
+            NexusConversationResult =
+            {
+              success: true,
+              text,
+              mode,
+              actionExecuted:
+                true,
+              actionResult,
+              requestId,
+              error: null
+            };
+
+          nexusStoreConversationResult(
+            finalResult
+          );
+
+          return finalResult;
+        }
+      }
+    }
+
+    if (
+      mode === "backend" ||
+      mode === "hybrid"
+    ) {
+      const backend =
+        await nexusTryBackendConversation(
+          request,
+          context
+        );
+
+      if (
+        backend.success &&
+        backend.data
+      ) {
+        const result:
+          NexusConversationResult =
+          {
+            success: true,
+            text:
+              backend.data.text,
+            mode,
+            actionExecuted,
+            actionResult,
+            requestId,
+            error: null
+          };
+
+        nexusStoreConversationResult(
+          result
+        );
+
+        nexusEmitEvent(
+          "ai.response",
+          {
+            requestId,
+            text:
+              result.text
+          },
+          "conversation-orchestrator"
+        );
+
+        return result;
+      }
+
+      if (
+        mode === "backend"
+      ) {
+        const result:
+          NexusConversationResult =
+          {
+            success: false,
+            text:
+              nexusGenerateConversationFallback(
+                request.message,
+                context
+              ),
+            mode,
+            actionExecuted,
+            actionResult,
+            requestId,
+            error:
+              backend.error ??
+              "Backend request failed."
+          };
+
+        nexusStoreConversationResult(
+          result
+        );
+
+        return result;
+      }
+    }
+
+    const localText =
+      nexusGenerateConversationFallback(
+        request.message,
+        context
+      );
+
+    const result:
+      NexusConversationResult =
+      {
+        success: true,
+        text: localText,
+        mode: "local",
+        actionExecuted,
+        actionResult,
+        requestId,
+        error: null
+      };
+
+    nexusStoreConversationResult(
+      result
+    );
+
+    nexusEmitEvent(
+      "ai.response",
+      {
+        requestId,
+        text:
+          result.text
+      },
+      "conversation-orchestrator"
+    );
+
+    return result;
+  };
+
+/* -------------------------
+   RESULT HISTORY
+   ------------------------- */
+
+const nexusStoreConversationResult =
+  (
+    result: NexusConversationResult
+  ) => {
+    nexusConversationHistory.push(
+      nexusClone(result)
+    );
+
+    if (
+      nexusConversationHistory.length >
+      nexusConversationHistoryLimit
+    ) {
+      nexusConversationHistory.shift();
+    }
+  };
+
+const nexusGetConversationHistory =
+  (): NexusConversationResult[] =>
+    nexusClone(
+      nexusConversationHistory
+    );
+
+/* -------------------------
+   CONVERSATION HELPERS
+   ------------------------- */
+
+const nexusAskNexus = async (
+  message: string,
+  chatId?: string
+): Promise<string> => {
+  const result =
+    await nexusProcessConversation({
+      message,
+      chatId,
+      mode: "hybrid",
+      useMemory: true,
+      useStyle: true,
+      useActions: true
+    });
+
+  return result.text;
+};
+
+const nexusConversationOrchestrator =
+  {
+    process:
+      nexusProcessConversation,
+
+    ask:
+      nexusAskNexus,
+
+    context:
+      nexusBuildConversationContext,
+
+    contextText:
+      nexusContextToText,
+
+    selectMode:
+      nexusSelectConversationMode,
+
+    history:
+      nexusGetConversationHistory
+  };
+
+registerNexusModule({
+  id: "conversation-orchestrator",
+  name: "NEXUS Conversation Orchestrator",
+  version: "1.0.0",
+  description:
+    "Объединяет AI, память, стиль общения, действия, локальный режим и backend.",
+  enabled: true
+});
+
+/* =========================================================
+   PART 29 COMPLETE
+   ========================================================= */
+// ============================================================
+// NEXUS — PART 30
+// LOCALIZATION & MULTILINGUAL ENGINE
+// ============================================================
+
+type NexusLanguageCode = "en" | "es" | "fr" | "ja";
+
+type NexusTranslationDictionary = Record<string, string>;
+
+type NexusLanguagePack = {
+  code: NexusLanguageCode;
+  name: string;
+  nativeName: string;
+  translations: NexusTranslationDictionary;
+};
+
+const nexusLanguagePacks: Record<
+  NexusLanguageCode,
+  NexusLanguagePack
+> = {
+  en: {
+    code: "en",
+    name: "English",
+    nativeName: "English",
+    translations: {
+      appName: "NEXUS",
+      chat: "Chat",
+      memory: "Memory",
+      notes: "Notes",
+      tasks: "Tasks",
+      calendar: "Calendar",
+      clock: "Clock",
+      files: "Files",
+      settings: "Settings",
+      search: "Search",
+      send: "Send",
+      save: "Save",
+      cancel: "Cancel",
+      delete: "Delete",
+      edit: "Edit",
+      create: "Create",
+      close: "Close",
+      today: "Today",
+      tomorrow: "Tomorrow",
+      yesterday: "Yesterday",
+      add: "Add",
+      done: "Done",
+      pending: "Pending",
+      completed: "Completed",
+      language: "Language",
+      notifications: "Notifications",
+      appearance: "Appearance",
+      darkMode: "Dark mode",
+      lightMode: "Light mode",
+      autoSave: "Auto-save",
+      enabled: "Enabled",
+      disabled: "Disabled",
+      noResults: "No results found",
+      noTasks: "No tasks",
+      noNotes: "No notes",
+      noEvents: "No events",
+      noFiles: "No files",
+      newChat: "New chat",
+      newNote: "New note",
+      newTask: "New task",
+      newEvent: "New event",
+      newTimer: "New timer",
+      newFile: "New file",
+      newFolder: "New folder",
+      alarm: "Alarm",
+      timer: "Timer",
+      profile: "Profile",
+      preferences: "Preferences",
+      welcome: "How can I help you?",
+    },
+  },
+
+  es: {
+    code: "es",
+    name: "Spanish",
+    nativeName: "Español",
+    translations: {
+      appName: "NEXUS",
+      chat: "Chat",
+      memory: "Memoria",
+      notes: "Notas",
+      tasks: "Tareas",
+      calendar: "Calendario",
+      clock: "Reloj",
+      files: "Archivos",
+      settings: "Configuración",
+      search: "Buscar",
+      send: "Enviar",
+      save: "Guardar",
+      cancel: "Cancelar",
+      delete: "Eliminar",
+      edit: "Editar",
+      create: "Crear",
+      close: "Cerrar",
+      today: "Hoy",
+      tomorrow: "Mañana",
+      yesterday: "Ayer",
+      add: "Añadir",
+      done: "Listo",
+      pending: "Pendiente",
+      completed: "Completado",
+      language: "Idioma",
+      notifications: "Notificaciones",
+      appearance: "Apariencia",
+      darkMode: "Modo oscuro",
+      lightMode: "Modo claro",
+      autoSave: "Guardado automático",
+      enabled: "Activado",
+      disabled: "Desactivado",
+      noResults: "No se encontraron resultados",
+      noTasks: "No hay tareas",
+      noNotes: "No hay notas",
+      noEvents: "No hay eventos",
+      noFiles: "No hay archivos",
+      newChat: "Nuevo chat",
+      newNote: "Nueva nota",
+      newTask: "Nueva tarea",
+      newEvent: "Nuevo evento",
+      newTimer: "Nuevo temporizador",
+      newFile: "Nuevo archivo",
+      newFolder: "Nueva carpeta",
+      alarm: "Alarma",
+      timer: "Temporizador",
+      profile: "Perfil",
+      preferences: "Preferencias",
+      welcome: "¿Cómo puedo ayudarte?",
+    },
+  },
+
+  fr: {
+    code: "fr",
+    name: "French",
+    nativeName: "Français",
+    translations: {
+      appName: "NEXUS",
+      chat: "Chat",
+      memory: "Mémoire",
+      notes: "Notes",
+      tasks: "Tâches",
+      calendar: "Calendrier",
+      clock: "Horloge",
+      files: "Fichiers",
+      settings: "Paramètres",
+      search: "Rechercher",
+      send: "Envoyer",
+      save: "Enregistrer",
+      cancel: "Annuler",
+      delete: "Supprimer",
+      edit: "Modifier",
+      create: "Créer",
+      close: "Fermer",
+      today: "Aujourd’hui",
+      tomorrow: "Demain",
+      yesterday: "Hier",
+      add: "Ajouter",
+      done: "Terminé",
+      pending: "En attente",
+      completed: "Terminé",
+      language: "Langue",
+      notifications: "Notifications",
+      appearance: "Apparence",
+      darkMode: "Mode sombre",
+      lightMode: "Mode clair",
+      autoSave: "Sauvegarde automatique",
+      enabled: "Activé",
+      disabled: "Désactivé",
+      noResults: "Aucun résultat",
+      noTasks: "Aucune tâche",
+      noNotes: "Aucune note",
+      noEvents: "Aucun événement",
+      noFiles: "Aucun fichier",
+      newChat: "Nouvelle conversation",
+      newNote: "Nouvelle note",
+      newTask: "Nouvelle tâche",
+      newEvent: "Nouvel événement",
+      newTimer: "Nouveau minuteur",
+      newFile: "Nouveau fichier",
+      newFolder: "Nouveau dossier",
+      alarm: "Alarme",
+      timer: "Minuteur",
+      profile: "Profil",
+      preferences: "Préférences",
+      welcome: "Comment puis-je vous aider ?",
+    },
+  },
+
+  ja: {
+    code: "ja",
+    name: "Japanese",
+    nativeName: "日本語",
+    translations: {
+      appName: "NEXUS",
+      chat: "チャット",
+      memory: "メモリ",
+      notes: "ノート",
+      tasks: "タスク",
+      calendar: "カレンダー",
+      clock: "時計",
+      files: "ファイル",
+      settings: "設定",
+      search: "検索",
+      send: "送信",
+      save: "保存",
+      cancel: "キャンセル",
+      delete: "削除",
+      edit: "編集",
+      create: "作成",
+      close: "閉じる",
+      today: "今日",
+      tomorrow: "明日",
+      yesterday: "昨日",
+      add: "追加",
+      done: "完了",
+      pending: "保留中",
+      completed: "完了済み",
+      language: "言語",
+      notifications: "通知",
+      appearance: "外観",
+      darkMode: "ダークモード",
+      lightMode: "ライトモード",
+      autoSave: "自動保存",
+      enabled: "有効",
+      disabled: "無効",
+      noResults: "結果が見つかりません",
+      noTasks: "タスクはありません",
+      noNotes: "ノートはありません",
+      noEvents: "予定はありません",
+      noFiles: "ファイルはありません",
+      newChat: "新しいチャット",
+      newNote: "新しいノート",
+      newTask: "新しいタスク",
+      newEvent: "新しい予定",
+      newTimer: "新しいタイマー",
+      newFile: "新しいファイル",
+      newFolder: "新しいフォルダ",
+      alarm: "アラーム",
+      timer: "タイマー",
+      profile: "プロフィール",
+      preferences: "環境設定",
+      welcome: "どのようにお手伝いできますか？",
+    },
+  },
+};
+
+const nexusLanguageAliases: Record<string, NexusLanguageCode> = {
+  en: "en",
+  eng: "en",
+  english: "en",
+
+  es: "es",
+  spa: "es",
+  spanish: "es",
+  español: "es",
+  espanol: "es",
+
+  fr: "fr",
+  fra: "fr",
+  french: "fr",
+  français: "fr",
+  francais: "fr",
+
+  ja: "ja",
+  jap: "ja",
+  japanese: "ja",
+  日本語: "ja",
+};
+
+function nexusNormalizeLanguage(
+  value?: string | null
+): NexusLanguageCode {
+  if (!value) {
+    return "en";
+  }
+
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace("_", "-");
+
+  const shortCode = normalized.split("-")[0];
+
+  return (
+    nexusLanguageAliases[normalized] ??
+    nexusLanguageAliases[shortCode] ??
+    "en"
+  );
+}
+
+function nexusGetLanguagePack(
+  language?: string | null
+): NexusLanguagePack {
+  const code = nexusNormalizeLanguage(language);
+  return nexusLanguagePacks[code];
+}
+
+function nexusTranslate(
+  key: string,
+  language?: string | null,
+  fallback?: string
+): string {
+  const pack = nexusGetLanguagePack(language);
+
+  return (
+    pack.translations[key] ??
+    fallback ??
+    nexusLanguagePacks.en.translations[key] ??
+    key
+  );
+}
+
+function nexusCreateTranslator(
+  language?: string | null
+): (key: string, fallback?: string) => string {
+  return (
+    key: string,
+    fallback?: string
+  ) => nexusTranslate(key, language, fallback);
+}
+
+function nexusListLanguages(): NexusLanguagePack[] {
+  return Object.values(nexusLanguagePacks);
+}
+
+function nexusIsSupportedLanguage(
+  language?: string | null
+): boolean {
+  if (!language) {
+    return false;
+  }
+
+  const normalized = language
+    .trim()
+    .toLowerCase();
+
+  return Boolean(
+    nexusLanguageAliases[normalized] ||
+      nexusLanguageAliases[normalized.split("-")[0]]
+  );
+}
+
+function nexusDetectLanguageFromText(
+  text: string
+): NexusLanguageCode {
+  const value = text.trim();
+
+  if (!value) {
+    return "en";
+  }
+
+  const japanesePattern =
+    /[\u3040-\u30ff\u3400-\u9fff]/;
+
+  if (japanesePattern.test(value)) {
+    return "ja";
+  }
+
+  const spanishPattern =
+    /[¿¡]|(?:\b(?:hola|gracias|cómo|como|quiero|puedo|para|que|qué|dónde|donde|mañana|hoy)\b)/i;
+
+  if (spanishPattern.test(value)) {
+    return "es";
+  }
+
+  const frenchPattern =
+    /(?:\b(?:bonjour|merci|comment|avec|pour|dans|je|vous|être|être|aujourd'hui)\b)|[àâçéèêëîïôûùüÿœæ]/i;
+
+  if (frenchPattern.test(value)) {
+    return "fr";
+  }
+
+  return "en";
+}
+
+function nexusGetLocalizedDate(
+  date: Date,
+  language?: string | null,
+  options?: Intl.DateTimeFormatOptions
+): string {
+  const localeMap: Record<NexusLanguageCode, string> = {
+    en: "en-US",
+    es: "es-ES",
+    fr: "fr-FR",
+    ja: "ja-JP",
+  };
+
+  const code = nexusNormalizeLanguage(language);
+
+  return new Intl.DateTimeFormat(
+    localeMap[code],
+    options ?? {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    }
+  ).format(date);
+}
+
+function nexusGetLocalizedTime(
+  date: Date,
+  language?: string | null
+): string {
+  const localeMap: Record<NexusLanguageCode, string> = {
+    en: "en-US",
+    es: "es-ES",
+    fr: "fr-FR",
+    ja: "ja-JP",
+  };
+
+  const code = nexusNormalizeLanguage(language);
+
+  return new Intl.DateTimeFormat(
+    localeMap[code],
+    {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    }
+  ).format(date);
+}
+
+function nexusLocalizeNavigation(
+  language?: string | null
+): Record<string, string> {
+  const keys = [
+    "chat",
+    "memory",
+    "notes",
+    "tasks",
+    "calendar",
+    "clock",
+    "files",
+    "settings",
+    "search",
+  ];
+
+  return keys.reduce(
+    (
+      result: Record<string, string>,
+      key: string
+    ) => {
+      result[key] = nexusTranslate(key, language);
+      return result;
+    },
+    {}
+  );
+}
+
+function nexusBuildLanguageContext(
+  language?: string | null
+): string {
+  const pack = nexusGetLanguagePack(language);
+
+  return [
+    `NEXUS interface language: ${pack.name}`,
+    `Native language name: ${pack.nativeName}`,
+    `Language code: ${pack.code}`,
+    "Respond naturally in the user's selected language when appropriate.",
+    "Do not translate proper names unnecessarily.",
+  ].join("\n");
+}
+
+function nexusResolveResponseLanguage(
+  userMessage: string,
+  selectedLanguage?: string | null
+): NexusLanguageCode {
+  const detected = nexusDetectLanguageFromText(userMessage);
+
+  if (
+    detected !== "en" ||
+    !selectedLanguage
+  ) {
+    return detected;
+  }
+
+  return nexusNormalizeLanguage(selectedLanguage);
+}
+
+function nexusGetLanguageLabel(
+  language: string
+): string {
+  return nexusGetLanguagePack(language).nativeName;
+}
+
+function nexusTranslateMany(
+  keys: string[],
+  language?: string | null
+): Record<string, string> {
+  return keys.reduce(
+    (
+      result: Record<string, string>,
+      key: string
+    ) => {
+      result[key] = nexusTranslate(key, language);
+      return result;
+    },
+    {}
+  );
+}
