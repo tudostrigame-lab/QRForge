@@ -16269,3 +16269,1573 @@ registerNexusModule({
 /* =========================================================
    PART 24 COMPLETE
    ========================================================= */
+/* =========================================================
+   NEXUS — PART 25
+   EVENT BUS + MODULE ORCHESTRATOR
+   ========================================================= */
+
+type NexusEventName =
+  | "app.started"
+  | "app.ready"
+  | "app.reset"
+  | "chat.created"
+  | "chat.deleted"
+  | "chat.message"
+  | "memory.added"
+  | "memory.updated"
+  | "memory.deleted"
+  | "note.created"
+  | "note.updated"
+  | "note.deleted"
+  | "task.created"
+  | "task.updated"
+  | "task.completed"
+  | "task.deleted"
+  | "calendar.created"
+  | "calendar.updated"
+  | "calendar.deleted"
+  | "timer.created"
+  | "timer.started"
+  | "timer.paused"
+  | "timer.completed"
+  | "timer.deleted"
+  | "file.created"
+  | "file.updated"
+  | "file.deleted"
+  | "search.performed"
+  | "settings.changed"
+  | "notification.sent"
+  | "ai.request"
+  | "ai.response"
+  | "ai.action"
+  | "system.error";
+
+type NexusEventPayload = Record<
+  string,
+  unknown
+>;
+
+type NexusEvent = {
+  id: string;
+  name: NexusEventName | string;
+  timestamp: number;
+  source: string;
+  payload: NexusEventPayload;
+};
+
+type NexusEventListener = (
+  event: NexusEvent
+) => void;
+
+type NexusEventSubscription = {
+  id: string;
+  eventName: string;
+  unsubscribe: () => void;
+};
+
+type NexusEventBus = {
+  emit: (
+    name: NexusEventName | string,
+    payload?: NexusEventPayload,
+    source?: string
+  ) => NexusEvent;
+
+  on: (
+    name: NexusEventName | string,
+    listener: NexusEventListener
+  ) => NexusEventSubscription;
+
+  once: (
+    name: NexusEventName | string,
+    listener: NexusEventListener
+  ) => NexusEventSubscription;
+
+  off: (
+    name: NexusEventName | string,
+    listener: NexusEventListener
+  ) => void;
+
+  clear: (
+    name?: NexusEventName | string
+  ) => void;
+
+  history: () => NexusEvent[];
+
+  recent: (
+    limit?: number
+  ) => NexusEvent[];
+
+  count: (
+    name?: NexusEventName | string
+  ) => number;
+};
+
+const nexusEventListeners =
+  new Map<
+    string,
+    Set<NexusEventListener>
+  >();
+
+const nexusEventHistory: NexusEvent[] =
+  [];
+
+const nexusEventHistoryLimit = 500;
+
+const nexusCreateEventId = (): string =>
+  `evt_${Date.now()}_${Math.random()
+    .toString(36)
+    .slice(2, 10)}`;
+
+const nexusEmitEvent = (
+  name: NexusEventName | string,
+  payload: NexusEventPayload = {},
+  source = "nexus"
+): NexusEvent => {
+  const event: NexusEvent = {
+    id: nexusCreateEventId(),
+    name,
+    timestamp: Date.now(),
+    source,
+    payload
+  };
+
+  nexusEventHistory.push(event);
+
+  if (
+    nexusEventHistory.length >
+    nexusEventHistoryLimit
+  ) {
+    nexusEventHistory.shift();
+  }
+
+  const listeners =
+    nexusEventListeners.get(name);
+
+  if (listeners) {
+    [
+      ...listeners
+    ].forEach((listener) => {
+      try {
+        listener(event);
+      } catch (error) {
+        console.error(
+          "NEXUS event listener error:",
+          error
+        );
+      }
+    });
+  }
+
+  const wildcardListeners =
+    nexusEventListeners.get("*");
+
+  if (wildcardListeners) {
+    [
+      ...wildcardListeners
+    ].forEach((listener) => {
+      try {
+        listener(event);
+      } catch (error) {
+        console.error(
+          "NEXUS wildcard listener error:",
+          error
+        );
+      }
+    });
+  }
+
+  return event;
+};
+
+const nexusSubscribeEvent = (
+  name: NexusEventName | string,
+  listener: NexusEventListener
+): NexusEventSubscription => {
+  if (
+    !nexusEventListeners.has(name)
+  ) {
+    nexusEventListeners.set(
+      name,
+      new Set()
+    );
+  }
+
+  nexusEventListeners
+    .get(name)!
+    .add(listener);
+
+  let active = true;
+
+  return {
+    id: `sub_${Date.now()}_${Math.random()
+      .toString(36)
+      .slice(2, 8)}`,
+
+    eventName: name,
+
+    unsubscribe: () => {
+      if (!active) {
+        return;
+      }
+
+      active = false;
+
+      nexusUnsubscribeEvent(
+        name,
+        listener
+      );
+    }
+  };
+};
+
+const nexusSubscribeOnce = (
+  name: NexusEventName | string,
+  listener: NexusEventListener
+): NexusEventSubscription => {
+  let subscription:
+    NexusEventSubscription;
+
+  const wrapper: NexusEventListener =
+    (event) => {
+      listener(event);
+      subscription.unsubscribe();
+    };
+
+  subscription =
+    nexusSubscribeEvent(
+      name,
+      wrapper
+    );
+
+  return subscription;
+};
+
+const nexusUnsubscribeEvent = (
+  name: NexusEventName | string,
+  listener: NexusEventListener
+) => {
+  const listeners =
+    nexusEventListeners.get(name);
+
+  if (!listeners) {
+    return;
+  }
+
+  listeners.delete(listener);
+
+  if (listeners.size === 0) {
+    nexusEventListeners.delete(name);
+  }
+};
+
+const nexusClearEvents = (
+  name?: NexusEventName | string
+) => {
+  if (name) {
+    nexusEventListeners.delete(name);
+    return;
+  }
+
+  nexusEventListeners.clear();
+};
+
+const nexusEventHistoryGet =
+  (): NexusEvent[] =>
+    [...nexusEventHistory];
+
+const nexusRecentEvents = (
+  limit = 20
+): NexusEvent[] =>
+  nexusEventHistory
+    .slice(
+      Math.max(
+        0,
+        nexusEventHistory.length -
+          Math.max(1, limit)
+      )
+    )
+    .reverse();
+
+const nexusEventCount = (
+  name?: NexusEventName | string
+): number => {
+  if (!name) {
+    return nexusEventHistory.length;
+  }
+
+  return nexusEventHistory.filter(
+    (event) =>
+      event.name === name
+  ).length;
+};
+
+/* -------------------------
+   MODULE ORCHESTRATOR
+   ------------------------- */
+
+type NexusModuleStatus =
+  | "registered"
+  | "starting"
+  | "ready"
+  | "disabled"
+  | "error";
+
+type NexusRuntimeModule = {
+  id: string;
+  name: string;
+  version: string;
+  status: NexusModuleStatus;
+  startedAt: number | null;
+  error: string | null;
+  dependencies: string[];
+};
+
+type NexusModuleStartFunction = () =>
+  | void
+  | Promise<void>;
+
+const nexusRuntimeModules =
+  new Map<
+    string,
+    NexusRuntimeModule
+  >();
+
+const nexusModuleStartHandlers =
+  new Map<
+    string,
+    NexusModuleStartFunction
+  >();
+
+const nexusRegisterRuntimeModule = (
+  module: NexusRuntimeModule,
+  start?: NexusModuleStartFunction
+) => {
+  nexusRuntimeModules.set(
+    module.id,
+    {
+      ...module
+    }
+  );
+
+  if (start) {
+    nexusModuleStartHandlers.set(
+      module.id,
+      start
+    );
+  }
+};
+
+const nexusGetRuntimeModules =
+  (): NexusRuntimeModule[] =>
+    Array.from(
+      nexusRuntimeModules.values()
+    );
+
+const nexusGetRuntimeModule = (
+  id: string
+): NexusRuntimeModule | null =>
+  nexusRuntimeModules.get(id) ??
+  null;
+
+const nexusSetModuleStatus = (
+  id: string,
+  status: NexusModuleStatus,
+  error: string | null = null
+) => {
+  const module =
+    nexusRuntimeModules.get(id);
+
+  if (!module) {
+    return;
+  }
+
+  module.status = status;
+  module.error = error;
+
+  if (status === "ready") {
+    module.startedAt =
+      module.startedAt ??
+      Date.now();
+  }
+};
+
+const nexusStartModule = async (
+  id: string
+): Promise<boolean> => {
+  const module =
+    nexusRuntimeModules.get(id);
+
+  if (!module) {
+    return false;
+  }
+
+  if (
+    module.status === "ready"
+  ) {
+    return true;
+  }
+
+  for (
+    const dependency of
+    module.dependencies
+  ) {
+    const dependencyModule =
+      nexusRuntimeModules.get(
+        dependency
+      );
+
+    if (
+      dependencyModule &&
+      dependencyModule.status !==
+        "ready"
+    ) {
+      const started =
+        await nexusStartModule(
+          dependency
+        );
+
+      if (!started) {
+        nexusSetModuleStatus(
+          id,
+          "error",
+          `Не удалось запустить зависимость: ${dependency}`
+        );
+
+        return false;
+      }
+    }
+  }
+
+  nexusSetModuleStatus(
+    id,
+    "starting"
+  );
+
+  try {
+    const handler =
+      nexusModuleStartHandlers.get(
+        id
+      );
+
+    if (handler) {
+      await handler();
+    }
+
+    nexusSetModuleStatus(
+      id,
+      "ready"
+    );
+
+    nexusEmitEvent(
+      "app.ready",
+      {
+        moduleId: id
+      },
+      "module-orchestrator"
+    );
+
+    return true;
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : String(error);
+
+    nexusSetModuleStatus(
+      id,
+      "error",
+      message
+    );
+
+    nexusEmitEvent(
+      "system.error",
+      {
+        moduleId: id,
+        error: message
+      },
+      "module-orchestrator"
+    );
+
+    return false;
+  }
+};
+
+const nexusStartAllModules =
+  async (): Promise<{
+    ready: string[];
+    failed: string[];
+  }> => {
+    const ready: string[] = [];
+    const failed: string[] = [];
+
+    for (
+      const module of
+      nexusRuntimeModules.values()
+    ) {
+      const success =
+        await nexusStartModule(
+          module.id
+        );
+
+      if (success) {
+        ready.push(module.id);
+      } else {
+        failed.push(module.id);
+      }
+    }
+
+    nexusEmitEvent(
+      "app.started",
+      {
+        ready,
+        failed
+      },
+      "module-orchestrator"
+    );
+
+    return {
+      ready,
+      failed
+    };
+  };
+
+const nexusDisableModule = (
+  id: string
+): boolean => {
+  const module =
+    nexusRuntimeModules.get(id);
+
+  if (!module) {
+    return false;
+  }
+
+  nexusSetModuleStatus(
+    id,
+    "disabled"
+  );
+
+  return true;
+};
+
+const nexusEnableModule = (
+  id: string
+): boolean => {
+  const module =
+    nexusRuntimeModules.get(id);
+
+  if (!module) {
+    return false;
+  }
+
+  if (
+    module.status ===
+    "disabled"
+  ) {
+    nexusSetModuleStatus(
+      id,
+      "registered"
+    );
+  }
+
+  return true;
+};
+
+/* -------------------------
+   HIGH-LEVEL EVENT HELPERS
+   ------------------------- */
+
+const nexusChatEvent = (
+  payload: NexusEventPayload
+) =>
+  nexusEmitEvent(
+    "chat.message",
+    payload,
+    "chat-engine"
+  );
+
+const nexusMemoryEvent = (
+  payload: NexusEventPayload
+) =>
+  nexusEmitEvent(
+    "memory.updated",
+    payload,
+    "memory-engine"
+  );
+
+const nexusTaskEvent = (
+  payload: NexusEventPayload
+) =>
+  nexusEmitEvent(
+    "task.updated",
+    payload,
+    "productivity-engine"
+  );
+
+const nexusCalendarEvent = (
+  payload: NexusEventPayload
+) =>
+  nexusEmitEvent(
+    "calendar.updated",
+    payload,
+    "calendar-engine"
+  );
+
+const nexusTimerEvent = (
+  payload: NexusEventPayload
+) =>
+  nexusEmitEvent(
+    "timer.started",
+    payload,
+    "timer-engine"
+  );
+
+const nexusFileEvent = (
+  payload: NexusEventPayload
+) =>
+  nexusEmitEvent(
+    "file.updated",
+    payload,
+    "file-engine"
+  );
+
+const nexusAIRequestEvent = (
+  payload: NexusEventPayload
+) =>
+  nexusEmitEvent(
+    "ai.request",
+    payload,
+    "ai-engine"
+  );
+
+const nexusAIResponseEvent = (
+  payload: NexusEventPayload
+) =>
+  nexusEmitEvent(
+    "ai.response",
+    payload,
+    "ai-engine"
+  );
+
+/* -------------------------
+   GLOBAL EVENT BUS
+   ------------------------- */
+
+const NEXUS_EVENT_BUS:
+  NexusEventBus = {
+  emit:
+    nexusEmitEvent,
+
+  on:
+    nexusSubscribeEvent,
+
+  once:
+    nexusSubscribeOnce,
+
+  off:
+    nexusUnsubscribeEvent,
+
+  clear:
+    nexusClearEvents,
+
+  history:
+    nexusEventHistoryGet,
+
+  recent:
+    nexusRecentEvents,
+
+  count:
+    nexusEventCount
+};
+
+/* -------------------------
+   MODULE REGISTRATION
+   ------------------------- */
+
+nexusRegisterRuntimeModule({
+  id: "event-bus",
+  name: "NEXUS Event Bus",
+  version: "1.0.0",
+  status: "registered",
+  startedAt: null,
+  error: null,
+  dependencies: []
+});
+
+nexusRegisterRuntimeModule({
+  id: "module-orchestrator",
+  name: "NEXUS Module Orchestrator",
+  version: "1.0.0",
+  status: "registered",
+  startedAt: null,
+  error: null,
+  dependencies: [
+    "event-bus"
+  ]
+});
+
+registerNexusModule({
+  id: "event-bus",
+  name: "NEXUS Event Bus",
+  version: "1.0.0",
+  description:
+    "Центральная система событий и связи между модулями NEXUS.",
+  enabled: true
+});
+
+registerNexusModule({
+  id: "module-orchestrator",
+  name: "NEXUS Module Orchestrator",
+  version: "1.0.0",
+  description:
+    "Запуск, управление и контроль модулей NEXUS.",
+  enabled: true
+});
+
+/* =========================================================
+   PART 25 COMPLETE
+   ========================================================= */
+/* =========================================================
+   NEXUS — PART 26
+   AI ACTION COORDINATOR
+   ========================================================= */
+
+type NexusAIActionStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+type NexusAIActionExecution = {
+  id: string;
+  actionId: string;
+  type: string;
+  status: NexusAIActionStatus;
+  input: Record<string, unknown>;
+  output: unknown;
+  error: string | null;
+  createdAt: number;
+  startedAt: number | null;
+  completedAt: number | null;
+};
+
+type NexusAIActionDefinition = {
+  id: string;
+  name: string;
+  description: string;
+  aliases: string[];
+  requiresConfirmation: boolean;
+  handler: (
+    input: Record<string, unknown>
+  ) =>
+    | unknown
+    | Promise<unknown>;
+};
+
+type NexusAIActionRequest = {
+  actionId: string;
+  input: Record<string, unknown>;
+  confirmationToken?: string;
+};
+
+type NexusAIActionResult = {
+  success: boolean;
+  execution: NexusAIActionExecution;
+  message: string;
+};
+
+const nexusAIActionDefinitions =
+  new Map<
+    string,
+    NexusAIActionDefinition
+  >();
+
+const nexusAIActionExecutions:
+  NexusAIActionExecution[] = [];
+
+const nexusAIActionHistoryLimit = 200;
+
+const nexusCreateAIActionId =
+  (): string =>
+    `ai_action_${Date.now()}_${Math.random()
+      .toString(36)
+      .slice(2, 10)}`;
+
+const nexusCreateExecutionId =
+  (): string =>
+    `exec_${Date.now()}_${Math.random()
+      .toString(36)
+      .slice(2, 10)}`;
+
+/* -------------------------
+   ACTION REGISTRATION
+   ------------------------- */
+
+const nexusRegisterAIAction = (
+  definition: NexusAIActionDefinition
+): boolean => {
+  if (
+    !definition.id ||
+    !definition.name ||
+    typeof definition.handler !==
+      "function"
+  ) {
+    return false;
+  }
+
+  nexusAIActionDefinitions.set(
+    definition.id,
+    {
+      ...definition,
+      aliases:
+        definition.aliases ?? []
+    }
+  );
+
+  return true;
+};
+
+const nexusGetAIAction =
+  (
+    actionId: string
+  ): NexusAIActionDefinition | null =>
+    nexusAIActionDefinitions.get(
+      actionId
+    ) ?? null;
+
+const nexusFindAIActionByText = (
+  text: string
+): NexusAIActionDefinition | null => {
+  const normalized =
+    text
+      .toLowerCase()
+      .trim();
+
+  for (
+    const action of
+    nexusAIActionDefinitions.values()
+  ) {
+    if (
+      normalized ===
+      action.id.toLowerCase()
+    ) {
+      return action;
+    }
+
+    if (
+      normalized ===
+      action.name.toLowerCase()
+    ) {
+      return action;
+    }
+
+    if (
+      action.aliases.some(
+        (alias) =>
+          normalized ===
+          alias.toLowerCase()
+      )
+    ) {
+      return action;
+    }
+  }
+
+  return null;
+};
+
+/* -------------------------
+   EXECUTION STORAGE
+   ------------------------- */
+
+const nexusStoreExecution = (
+  execution: NexusAIActionExecution
+) => {
+  nexusAIActionExecutions.push(
+    execution
+  );
+
+  if (
+    nexusAIActionExecutions.length >
+    nexusAIActionHistoryLimit
+  ) {
+    nexusAIActionExecutions.shift();
+  }
+};
+
+const nexusGetAIActionExecutions =
+  (): NexusAIActionExecution[] =>
+    [
+      ...nexusAIActionExecutions
+    ].reverse();
+
+const nexusGetAIActionExecution = (
+  id: string
+): NexusAIActionExecution | null =>
+  nexusAIActionExecutions.find(
+    (execution) =>
+      execution.id === id
+  ) ?? null;
+
+/* -------------------------
+   CONFIRMATION
+   ------------------------- */
+
+const nexusCreateConfirmationToken =
+  (
+    actionId: string
+  ): string =>
+    `${actionId}:${Date.now()}:${Math.random()
+      .toString(36)
+      .slice(2, 12)}`;
+
+const nexusIsConfirmationValid = (
+  token: string | undefined,
+  actionId: string
+): boolean => {
+  if (!token) {
+    return false;
+  }
+
+  return token.startsWith(
+    `${actionId}:`
+  );
+};
+
+/* -------------------------
+   ACTION EXECUTION
+   ------------------------- */
+
+const nexusExecuteAIAction = async (
+  request: NexusAIActionRequest
+): Promise<NexusAIActionResult> => {
+  const definition =
+    nexusGetAIAction(
+      request.actionId
+    );
+
+  const execution: NexusAIActionExecution =
+    {
+      id: nexusCreateExecutionId(),
+      actionId:
+        request.actionId,
+      type:
+        request.actionId,
+      status: "pending",
+      input:
+        nexusClone(
+          request.input
+        ),
+      output: null,
+      error: null,
+      createdAt: Date.now(),
+      startedAt: null,
+      completedAt: null
+    };
+
+  nexusStoreExecution(
+    execution
+  );
+
+  if (!definition) {
+    execution.status =
+      "failed";
+
+    execution.error =
+      "AI action not found.";
+
+    execution.completedAt =
+      Date.now();
+
+    return {
+      success: false,
+      execution,
+      message:
+        "Действие не найдено."
+    };
+  }
+
+  if (
+    definition.requiresConfirmation &&
+    !nexusIsConfirmationValid(
+      request.confirmationToken,
+      definition.id
+    )
+  ) {
+    execution.status =
+      "cancelled";
+
+    execution.completedAt =
+      Date.now();
+
+    return {
+      success: false,
+      execution,
+      message:
+        "Для этого действия требуется подтверждение."
+    };
+  }
+
+  execution.status =
+    "running";
+
+  execution.startedAt =
+    Date.now();
+
+  nexusAIRequestEvent({
+    actionId:
+      definition.id,
+    executionId:
+      execution.id,
+    input:
+      execution.input
+  });
+
+  try {
+    const output =
+      await definition.handler(
+        request.input
+      );
+
+    execution.output =
+      nexusClone(output);
+
+    execution.status =
+      "completed";
+
+    execution.completedAt =
+      Date.now();
+
+    nexusEmitEvent(
+      "ai.action",
+      {
+        actionId:
+          definition.id,
+        executionId:
+          execution.id,
+        status:
+          "completed",
+        output:
+          execution.output
+      },
+      "ai-action-coordinator"
+    );
+
+    return {
+      success: true,
+      execution,
+      message:
+        "Действие выполнено."
+    };
+  } catch (error) {
+    const errorMessage =
+      error instanceof Error
+        ? error.message
+        : String(error);
+
+    execution.status =
+      "failed";
+
+    execution.error =
+      errorMessage;
+
+    execution.completedAt =
+      Date.now();
+
+    nexusEmitEvent(
+      "system.error",
+      {
+        actionId:
+          definition.id,
+        executionId:
+          execution.id,
+        error:
+          errorMessage
+      },
+      "ai-action-coordinator"
+    );
+
+    return {
+      success: false,
+      execution,
+      message:
+        "Не удалось выполнить действие."
+    };
+  }
+};
+
+/* -------------------------
+   ACTION DISCOVERY
+   ------------------------- */
+
+const nexusListAIActions =
+  (): NexusAIActionDefinition[] =>
+    Array.from(
+      nexusAIActionDefinitions.values()
+    ).map(
+      (action) => ({
+        ...action,
+        aliases: [
+          ...action.aliases
+        ]
+      })
+    );
+
+const nexusDescribeAIActions =
+  (): string =>
+    nexusListAIActions()
+      .map(
+        (action) =>
+          `${action.name}: ${action.description}`
+      )
+      .join("\n");
+
+/* -------------------------
+   BUILT-IN ACTIONS
+   ------------------------- */
+
+nexusRegisterAIAction({
+  id: "create_note",
+  name: "Создать заметку",
+  description:
+    "Создаёт новую заметку.",
+  aliases: [
+    "создай заметку",
+    "новая заметка",
+    "create note"
+  ],
+  requiresConfirmation: false,
+  handler: async (
+    input
+  ) => {
+    const title =
+      String(
+        input.title ??
+          "Новая заметка"
+      );
+
+    const content =
+      String(
+        input.content ?? ""
+      );
+
+    const note: NexusNote = {
+      id: `note_${Date.now()}_${Math.random()
+        .toString(36)
+        .slice(2, 8)}`,
+      title,
+      content,
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    };
+
+    nexusStateUpdateNotes(
+      (notes) => [
+        ...notes,
+        note
+      ]
+    );
+
+    nexusEmitEvent(
+      "note.created",
+      {
+        note
+      },
+      "ai-action-coordinator"
+    );
+
+    return note;
+  }
+});
+
+nexusRegisterAIAction({
+  id: "create_task",
+  name: "Создать задачу",
+  description:
+    "Создаёт новую задачу.",
+  aliases: [
+    "создай задачу",
+    "новая задача",
+    "create task"
+  ],
+  requiresConfirmation: false,
+  handler: async (
+    input
+  ) => {
+    const task: NexusTask = {
+      id: `task_${Date.now()}_${Math.random()
+        .toString(36)
+        .slice(2, 8)}`,
+      title:
+        String(
+          input.title ??
+            "Новая задача"
+        ),
+      description:
+        String(
+          input.description ??
+            ""
+        ),
+      dueDate:
+        input.dueDate
+          ? String(
+              input.dueDate
+            )
+          : "",
+      dueTime:
+        input.dueTime
+          ? String(
+              input.dueTime
+            )
+          : "",
+      completed: false,
+      createdAt: Date.now()
+    };
+
+    nexusStateUpdateTasks(
+      (tasks) => [
+        ...tasks,
+        task
+      ]
+    );
+
+    nexusEmitEvent(
+      "task.created",
+      {
+        task
+      },
+      "ai-action-coordinator"
+    );
+
+    return task;
+  }
+});
+
+nexusRegisterAIAction({
+  id: "create_calendar_event",
+  name: "Создать событие",
+  description:
+    "Добавляет событие в календарь.",
+  aliases: [
+    "создай событие",
+    "добавь в календарь",
+    "create event"
+  ],
+  requiresConfirmation: false,
+  handler: async (
+    input
+  ) => {
+    const event: NexusCalendarEvent =
+      {
+        id: `event_${Date.now()}_${Math.random()
+          .toString(36)
+          .slice(2, 8)}`,
+        title:
+          String(
+            input.title ??
+              "Новое событие"
+          ),
+        description:
+          String(
+            input.description ??
+              ""
+          ),
+        date:
+          String(
+            input.date ??
+              ""
+          ),
+        time:
+          String(
+            input.time ??
+              ""
+          ),
+        createdAt:
+          Date.now()
+      };
+
+    nexusStateUpdateEvents(
+      (events) => [
+        ...events,
+        event
+      ]
+    );
+
+    nexusEmitEvent(
+      "calendar.created",
+      {
+        event
+      },
+      "ai-action-coordinator"
+    );
+
+    return event;
+  }
+});
+
+nexusRegisterAIAction({
+  id: "start_timer",
+  name: "Запустить таймер",
+  description:
+    "Запускает таймер на указанное количество секунд.",
+  aliases: [
+    "запусти таймер",
+    "поставь таймер",
+    "start timer"
+  ],
+  requiresConfirmation: false,
+  handler: async (
+    input
+  ) => {
+    const seconds = Math.max(
+      1,
+      Number(
+        input.seconds ?? 60
+      )
+    );
+
+    const timer: NexusTimer = {
+      id: `timer_${Date.now()}_${Math.random()
+        .toString(36)
+        .slice(2, 8)}`,
+      name:
+        String(
+          input.name ??
+            "Таймер"
+        ),
+      duration:
+        seconds,
+      remaining:
+        seconds,
+      running: true,
+      createdAt:
+        Date.now()
+    };
+
+    nexusStateUpdateTimers(
+      (timers) => [
+        ...timers,
+        timer
+      ]
+    );
+
+    nexusEmitEvent(
+      "timer.started",
+      {
+        timer
+      },
+      "ai-action-coordinator"
+    );
+
+    return timer;
+  }
+});
+
+nexusRegisterAIAction({
+  id: "remember",
+  name: "Запомнить",
+  description:
+    "Добавляет информацию в память NEXUS.",
+  aliases: [
+    "запомни",
+    "remember"
+  ],
+  requiresConfirmation: false,
+  handler: async (
+    input
+  ) => {
+    const item: NexusMemoryItem =
+      {
+        id: `memory_${Date.now()}_${Math.random()
+          .toString(36)
+          .slice(2, 8)}`,
+        text:
+          String(
+            input.text ??
+              ""
+          ),
+        category:
+          (
+            input.category ??
+            "fact"
+          ) as NexusMemoryItem["category"],
+        createdAt:
+          Date.now()
+      };
+
+    nexusStateUpdateMemory(
+      (memory) => [
+        ...memory,
+        item
+      ]
+    );
+
+    nexusEmitEvent(
+      "memory.added",
+      {
+        memory:
+          item
+      },
+      "ai-action-coordinator"
+    );
+
+    return item;
+  }
+});
+
+/* -------------------------
+   ACTION COMMAND PARSER
+   ------------------------- */
+
+const nexusParseAIActionCommand =
+  (
+    text: string
+  ): NexusAIActionRequest | null => {
+    const normalized =
+      text
+        .trim()
+        .toLowerCase();
+
+    if (
+      normalized.startsWith(
+        "создай заметку "
+      )
+    ) {
+      return {
+        actionId:
+          "create_note",
+        input: {
+          title:
+            text
+              .trim()
+              .slice(
+                "создай заметку ".length
+              )
+        }
+      };
+    }
+
+    if (
+      normalized.startsWith(
+        "создай задачу "
+      )
+    ) {
+      return {
+        actionId:
+          "create_task",
+        input: {
+          title:
+            text
+              .trim()
+              .slice(
+                "создай задачу ".length
+              )
+        }
+      };
+    }
+
+    if (
+      normalized.startsWith(
+        "запомни "
+      )
+    ) {
+      return {
+        actionId:
+          "remember",
+        input: {
+          text:
+            text
+              .trim()
+              .slice(
+                "запомни ".length
+              )
+        }
+      };
+    }
+
+    if (
+      normalized.startsWith(
+        "поставь таймер "
+      )
+    ) {
+      const value =
+        Number(
+          normalized
+            .replace(
+              "поставь таймер ",
+              ""
+            )
+            .replace(
+              " секунд",
+              ""
+            )
+            .trim()
+        );
+
+      if (
+        Number.isFinite(
+          value
+        )
+      ) {
+        return {
+          actionId:
+            "start_timer",
+          input: {
+            seconds:
+              value
+          }
+        };
+      }
+    }
+
+    return null;
+  };
+
+/* -------------------------
+   COORDINATOR
+   ------------------------- */
+
+const nexusAIActionCoordinator =
+  {
+    register:
+      nexusRegisterAIAction,
+
+    get:
+      nexusGetAIAction,
+
+    find:
+      nexusFindAIActionByText,
+
+    list:
+      nexusListAIActions,
+
+    describe:
+      nexusDescribeAIActions,
+
+    parse:
+      nexusParseAIActionCommand,
+
+    execute:
+      nexusExecuteAIAction,
+
+    executions:
+      nexusGetAIActionExecutions,
+
+    execution:
+      nexusGetAIActionExecution,
+
+    confirmation:
+      nexusCreateConfirmationToken
+  };
+
+registerNexusModule({
+  id: "ai-action-coordinator",
+  name: "NEXUS AI Action Coordinator",
+  version: "1.0.0",
+  description:
+    "Центральная система выполнения действий, которые NEXUS может выполнять по команде пользователя.",
+  enabled: true
+});
+
+/* =========================================================
+   PART 26 COMPLETE
+   ========================================================= */
