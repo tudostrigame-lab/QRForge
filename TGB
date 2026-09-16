@@ -14067,3 +14067,2205 @@ registerNexusModule({
 /* =========================================================
    PART 21 COMPLETE
    ========================================================= */
+/* =========================================================
+   NEXUS — PART 22
+   USER COMMUNICATION STYLE ENGINE
+   ========================================================= */
+
+type NexusStyleMetric = {
+  id: string;
+  name: string;
+  value: number;
+  confidence: number;
+};
+
+type NexusUserStyleProfile = {
+  messageCount: number;
+  averageMessageLength: number;
+  averageWordCount: number;
+  shortMessageRatio: number;
+  longMessageRatio: number;
+  questionRatio: number;
+  commandRatio: number;
+  emojiRatio: number;
+  punctuationRatio: number;
+  preferredResponseLength:
+    | "short"
+    | "medium"
+    | "long";
+  preferredTone:
+    | "casual"
+    | "neutral"
+    | "formal";
+  language:
+    | "ru"
+    | "en"
+    | "es"
+    | "fr"
+    | "ja"
+    | "unknown";
+  updatedAt: number;
+};
+
+type NexusStyleInstruction = {
+  length: string;
+  tone: string;
+  structure: string;
+  language: string;
+  avoid: string[];
+};
+
+const nexusStyleWords = (
+  text: string
+): string[] => {
+  return text
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+};
+
+const nexusStyleAverage = (
+  values: number[]
+): number => {
+  if (values.length === 0) {
+    return 0;
+  }
+
+  return (
+    values.reduce(
+      (sum, value) =>
+        sum + value,
+      0
+    ) / values.length
+  );
+};
+
+const nexusStyleRatio = (
+  conditionValues: boolean[]
+): number => {
+  if (
+    conditionValues.length === 0
+  ) {
+    return 0;
+  }
+
+  return (
+    conditionValues.filter(
+      Boolean
+    ).length /
+    conditionValues.length
+  );
+};
+
+const nexusAnalyzeUserMessages = (
+  messages: NexusMessage[]
+): NexusUserStyleProfile => {
+  const userMessages =
+    messages.filter(
+      (message) =>
+        message.role === "user"
+    );
+
+  if (
+    userMessages.length === 0
+  ) {
+    return {
+      messageCount: 0,
+      averageMessageLength: 0,
+      averageWordCount: 0,
+      shortMessageRatio: 0,
+      longMessageRatio: 0,
+      questionRatio: 0,
+      commandRatio: 0,
+      emojiRatio: 0,
+      punctuationRatio: 0,
+      preferredResponseLength:
+        "medium",
+      preferredTone:
+        "casual",
+      language:
+        "unknown",
+      updatedAt: Date.now()
+    };
+  }
+
+  const lengths =
+    userMessages.map(
+      (message) =>
+        message.content.length
+    );
+
+  const wordCounts =
+    userMessages.map(
+      (message) =>
+        nexusStyleWords(
+          message.content
+        ).length
+    );
+
+  const shortMessages =
+    userMessages.map(
+      (message) =>
+        message.content.length <= 60
+    );
+
+  const longMessages =
+    userMessages.map(
+      (message) =>
+        message.content.length >= 250
+    );
+
+  const questions =
+    userMessages.map(
+      (message) =>
+        message.content.includes("?") ||
+        message.content.includes("？")
+    );
+
+  const commands =
+    userMessages.map(
+      (message) => {
+        const text =
+          message.content
+            .trim()
+            .toLowerCase();
+
+        return (
+          text.startsWith(
+            "дай"
+          ) ||
+          text.startsWith(
+            "сделай"
+          ) ||
+          text.startsWith(
+            "напиши"
+          ) ||
+          text.startsWith(
+            "покажи"
+          ) ||
+          text.startsWith(
+            "давай"
+          ) ||
+          text.startsWith(
+            "send"
+          ) ||
+          text.startsWith(
+            "give"
+          ) ||
+          text.startsWith(
+            "show"
+          )
+        );
+      }
+    );
+
+  const emojis =
+    userMessages.map(
+      (message) =>
+        /[\u{1F300}-\u{1FAFF}]/u.test(
+          message.content
+        )
+    );
+
+  const punctuation =
+    userMessages.map(
+      (message) =>
+        /[!?.,:;]/.test(
+          message.content
+        )
+    );
+
+  const averageLength =
+    nexusStyleAverage(
+      lengths
+    );
+
+  const averageWords =
+    nexusStyleAverage(
+      wordCounts
+    );
+
+  let preferredResponseLength:
+    | "short"
+    | "medium"
+    | "long" =
+    "medium";
+
+  if (
+    averageLength < 100
+  ) {
+    preferredResponseLength =
+      "short";
+  } else if (
+    averageLength > 300
+  ) {
+    preferredResponseLength =
+      "long";
+  }
+
+  const detectedLanguage =
+    nexusDetectStyleLanguage(
+      userMessages.map(
+        (message) =>
+          message.content
+      )
+    );
+
+  return {
+    messageCount:
+      userMessages.length,
+
+    averageMessageLength:
+      Math.round(
+        averageLength
+      ),
+
+    averageWordCount:
+      Math.round(
+        averageWords
+      ),
+
+    shortMessageRatio:
+      nexusStyleRatio(
+        shortMessages
+      ),
+
+    longMessageRatio:
+      nexusStyleRatio(
+        longMessages
+      ),
+
+    questionRatio:
+      nexusStyleRatio(
+        questions
+      ),
+
+    commandRatio:
+      nexusStyleRatio(
+        commands
+      ),
+
+    emojiRatio:
+      nexusStyleRatio(
+        emojis
+      ),
+
+    punctuationRatio:
+      nexusStyleRatio(
+        punctuation
+      ),
+
+    preferredResponseLength,
+
+    preferredTone:
+      "casual",
+
+    language:
+      detectedLanguage,
+
+    updatedAt:
+      Date.now()
+  };
+};
+
+const nexusDetectStyleLanguage = (
+  messages: string[]
+):
+  | "ru"
+  | "en"
+  | "es"
+  | "fr"
+  | "ja"
+  | "unknown" => {
+  const text =
+    messages
+      .join(" ")
+      .toLowerCase();
+
+  const russian =
+    (text.match(
+      /[а-яё]/g
+    ) ?? []).length;
+
+  const latin =
+    (text.match(
+      /[a-z]/g
+    ) ?? []).length;
+
+  const japanese =
+    (text.match(
+      /[\u3040-\u30ff\u4e00-\u9faf]/g
+    ) ?? []).length;
+
+  if (
+    japanese >
+    Math.max(
+      russian,
+      latin
+    )
+  ) {
+    return "ja";
+  }
+
+  const spanish =
+    (
+      text.match(
+        /\b(el|la|los|las|que|como|para|una|uno|hola)\b/g
+      ) ?? []
+    ).length;
+
+  const french =
+    (
+      text.match(
+        /\b(le|la|les|des|une|que|pour|bonjour)\b/g
+      ) ?? []
+    ).length;
+
+  if (
+    spanish > 2 &&
+    spanish > french
+  ) {
+    return "es";
+  }
+
+  if (
+    french > 2 &&
+    french > spanish
+  ) {
+    return "fr";
+  }
+
+  if (
+    russian > latin
+  ) {
+    return "ru";
+  }
+
+  if (
+    latin > 0
+  ) {
+    return "en";
+  }
+
+  return "unknown";
+};
+
+const nexusBuildStyleInstruction = (
+  profile: NexusUserStyleProfile
+): NexusStyleInstruction => {
+  let length =
+    "Отвечай умеренно подробно.";
+
+  if (
+    profile.preferredResponseLength ===
+    "short"
+  ) {
+    length =
+      "Отвечай коротко и по делу.";
+  }
+
+  if (
+    profile.preferredResponseLength ===
+    "long"
+  ) {
+    length =
+      "Можешь давать подробные ответы.";
+  }
+
+  let structure =
+    "Используй понятные абзацы.";
+
+  if (
+    profile.commandRatio >
+    0.35
+  ) {
+    structure =
+      "Сначала давай непосредственный результат, затем детали при необходимости.";
+  }
+
+  if (
+    profile.questionRatio >
+    0.45
+  ) {
+    structure =
+      "Отвечай непосредственно на вопрос и не уходи от темы.";
+  }
+
+  const avoid: string[] = [];
+
+  if (
+    profile.emojiRatio <
+    0.05
+  ) {
+    avoid.push(
+      "Не используй много эмодзи."
+    );
+  }
+
+  if (
+    profile.shortMessageRatio >
+    0.65
+  ) {
+    avoid.push(
+      "Не перегружай ответ лишними пояснениями."
+    );
+  }
+
+  let language =
+    "Используй язык текущего сообщения.";
+
+  if (
+    profile.language !==
+      "unknown"
+  ) {
+    language =
+      `Предпочтительно отвечай на ${nexusStyleLanguageName(
+        profile.language
+      )}.`;
+  }
+
+  return {
+    length,
+    tone:
+      "Сохраняй естественный, дружелюбный и непринуждённый стиль.",
+    structure,
+    language,
+    avoid
+  };
+};
+
+const nexusStyleLanguageName = (
+  language:
+    | "ru"
+    | "en"
+    | "es"
+    | "fr"
+    | "ja"
+    | "unknown"
+): string => {
+  const names = {
+    ru: "русском языке",
+    en: "английском языке",
+    es: "испанском языке",
+    fr: "французском языке",
+    ja: "японском языке",
+    unknown:
+      "языке текущего сообщения"
+  };
+
+  return names[language];
+};
+
+const nexusStyleMetrics = (
+  profile: NexusUserStyleProfile
+): NexusStyleMetric[] => {
+  return [
+    {
+      id: "message-length",
+      name: "Средняя длина сообщения",
+      value:
+        profile.averageMessageLength,
+      confidence:
+        Math.min(
+          1,
+          profile.messageCount /
+            50
+        )
+    },
+
+    {
+      id: "short-messages",
+      name: "Короткие сообщения",
+      value:
+        profile.shortMessageRatio,
+      confidence:
+        Math.min(
+          1,
+          profile.messageCount /
+            50
+        )
+    },
+
+    {
+      id: "long-messages",
+      name: "Длинные сообщения",
+      value:
+        profile.longMessageRatio,
+      confidence:
+        Math.min(
+          1,
+          profile.messageCount /
+            50
+        )
+    },
+
+    {
+      id: "questions",
+      name: "Вопросы",
+      value:
+        profile.questionRatio,
+      confidence:
+        Math.min(
+          1,
+          profile.messageCount /
+            50
+        )
+    },
+
+    {
+      id: "commands",
+      name: "Команды",
+      value:
+        profile.commandRatio,
+      confidence:
+        Math.min(
+          1,
+          profile.messageCount /
+            50
+        )
+    },
+
+    {
+      id: "emoji",
+      name: "Использование эмодзи",
+      value:
+        profile.emojiRatio,
+      confidence:
+        Math.min(
+          1,
+          profile.messageCount /
+            50
+        )
+    }
+  ];
+};
+
+const nexusStyleMergeProfiles = (
+  oldProfile: NexusUserStyleProfile,
+  newProfile: NexusUserStyleProfile
+): NexusUserStyleProfile => {
+  const oldCount =
+    oldProfile.messageCount;
+
+  const newCount =
+    newProfile.messageCount;
+
+  if (oldCount === 0) {
+    return {
+      ...newProfile
+    };
+  }
+
+  if (newCount === 0) {
+    return {
+      ...oldProfile
+    };
+  }
+
+  const total =
+    oldCount + newCount;
+
+  const weighted = (
+    oldValue: number,
+    newValue: number
+  ) =>
+    (
+      oldValue * oldCount +
+      newValue * newCount
+    ) / total;
+
+  const averageLength =
+    weighted(
+      oldProfile.averageMessageLength,
+      newProfile.averageMessageLength
+    );
+
+  const averageWords =
+    weighted(
+      oldProfile.averageWordCount,
+      newProfile.averageWordCount
+    );
+
+  const chooseLength =
+    averageLength < 100
+      ? "short"
+      : averageLength > 300
+      ? "long"
+      : "medium";
+
+  return {
+    messageCount:
+      total,
+
+    averageMessageLength:
+      Math.round(
+        averageLength
+      ),
+
+    averageWordCount:
+      Math.round(
+        averageWords
+      ),
+
+    shortMessageRatio:
+      weighted(
+        oldProfile.shortMessageRatio,
+        newProfile.shortMessageRatio
+      ),
+
+    longMessageRatio:
+      weighted(
+        oldProfile.longMessageRatio,
+        newProfile.longMessageRatio
+      ),
+
+    questionRatio:
+      weighted(
+        oldProfile.questionRatio,
+        newProfile.questionRatio
+      ),
+
+    commandRatio:
+      weighted(
+        oldProfile.commandRatio,
+        newProfile.commandRatio
+      ),
+
+    emojiRatio:
+      weighted(
+        oldProfile.emojiRatio,
+        newProfile.emojiRatio
+      ),
+
+    punctuationRatio:
+      weighted(
+        oldProfile.punctuationRatio,
+        newProfile.punctuationRatio
+      ),
+
+    preferredResponseLength:
+      chooseLength,
+
+    preferredTone:
+      newProfile.preferredTone,
+
+    language:
+      newProfile.language !==
+      "unknown"
+        ? newProfile.language
+        : oldProfile.language,
+
+    updatedAt:
+      Date.now()
+  };
+};
+
+const nexusStyleApplyToPrompt = (
+  prompt: string,
+  profile: NexusUserStyleProfile
+): string => {
+  const instruction =
+    nexusBuildStyleInstruction(
+      profile
+    );
+
+  return [
+    instruction.length,
+    instruction.tone,
+    instruction.structure,
+    instruction.language,
+    ...instruction.avoid,
+    "",
+    "Пользовательский запрос:",
+    prompt
+  ].join("\n");
+};
+
+const nexusStyleStorageKey =
+  "nexus_user_style_v1";
+
+const nexusStyleSave = (
+  profile: NexusUserStyleProfile
+): boolean => {
+  if (
+    typeof window ===
+    "undefined"
+  ) {
+    return false;
+  }
+
+  try {
+    localStorage.setItem(
+      nexusStyleStorageKey,
+      JSON.stringify(profile)
+    );
+
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const nexusStyleLoad =
+  (): NexusUserStyleProfile | null => {
+    if (
+      typeof window ===
+      "undefined"
+    ) {
+      return null;
+    }
+
+    try {
+      const raw =
+        localStorage.getItem(
+          nexusStyleStorageKey
+        );
+
+      if (!raw) {
+        return null;
+      }
+
+      const parsed: unknown =
+        JSON.parse(raw);
+
+      if (
+        !parsed ||
+        typeof parsed !==
+          "object"
+      ) {
+        return null;
+      }
+
+      return parsed as NexusUserStyleProfile;
+    } catch {
+      return null;
+    }
+  };
+
+const nexusStyleReset = (): boolean => {
+  if (
+    typeof window ===
+    "undefined"
+  ) {
+    return false;
+  }
+
+  try {
+    localStorage.removeItem(
+      nexusStyleStorageKey
+    );
+
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const NEXUS_STYLE_ENGINE = {
+  analyze:
+    nexusAnalyzeUserMessages,
+
+  detectLanguage:
+    nexusDetectStyleLanguage,
+
+  buildInstruction:
+    nexusBuildStyleInstruction,
+
+  metrics:
+    nexusStyleMetrics,
+
+  merge:
+    nexusStyleMergeProfiles,
+
+  applyToPrompt:
+    nexusStyleApplyToPrompt,
+
+  save:
+    nexusStyleSave,
+
+  load:
+    nexusStyleLoad,
+
+  reset:
+    nexusStyleReset
+};
+
+registerNexusModule({
+  id: "user-style-engine",
+  name: "User Communication Style Engine",
+  version: "1.0.0",
+  description:
+    "Анализирует стиль общения пользователя и помогает NEXUS адаптировать формат ответов без фиксированного характера.",
+  enabled: true
+});
+
+/* =========================================================
+   PART 22 COMPLETE
+   ========================================================= */
+/* =========================================================
+   NEXUS — PART 23
+   SMART RECOMMENDATION & PROACTIVE ASSISTANT ENGINE
+   ========================================================= */
+
+type NexusRecommendationType =
+  | "task"
+  | "calendar"
+  | "memory"
+  | "note"
+  | "timer"
+  | "chat"
+  | "system";
+
+type NexusRecommendationPriority =
+  | "low"
+  | "normal"
+  | "high";
+
+type NexusRecommendation = {
+  id: string;
+  type: NexusRecommendationType;
+  priority: NexusRecommendationPriority;
+  title: string;
+  description: string;
+  action?: string;
+  entityId?: string;
+  createdAt: number;
+  expiresAt?: number;
+};
+
+type NexusRecommendationContext = {
+  tasks: NexusTask[];
+  events: NexusCalendarEvent[];
+  memory: NexusMemoryItem[];
+  notes: NexusNote[];
+  timers: NexusTimer[];
+  chats: NexusChat[];
+  now?: number;
+};
+
+const nexusRecommendationId = (
+  type: NexusRecommendationType
+): string =>
+  `recommendation_${type}_${Date.now()}_${Math.random()
+    .toString(36)
+    .slice(2, 9)}`;
+
+const nexusRecommendation = (
+  type: NexusRecommendationType,
+  priority: NexusRecommendationPriority,
+  title: string,
+  description: string,
+  options?: {
+    action?: string;
+    entityId?: string;
+    expiresAt?: number;
+  }
+): NexusRecommendation => ({
+  id: nexusRecommendationId(type),
+  type,
+  priority,
+  title,
+  description,
+  action: options?.action,
+  entityId: options?.entityId,
+  createdAt: Date.now(),
+  expiresAt: options?.expiresAt,
+});
+
+/* -------------------------
+   TASK RECOMMENDATIONS
+   ------------------------- */
+
+const nexusRecommendTasks = (
+  tasks: NexusTask[],
+  now: number
+): NexusRecommendation[] => {
+  const recommendations: NexusRecommendation[] = [];
+
+  const pending = tasks.filter(
+    (task) =>
+      !task.completed
+  );
+
+  for (const task of pending) {
+    const dueDate =
+      (task as NexusTask & {
+        dueDate?: string;
+      }).dueDate;
+
+    if (!dueDate) {
+      continue;
+    }
+
+    const due =
+      new Date(dueDate).getTime();
+
+    if (!Number.isFinite(due)) {
+      continue;
+    }
+
+    const hours =
+      (due - now) /
+      (1000 * 60 * 60);
+
+    if (
+      hours >= 0 &&
+      hours <= 24
+    ) {
+      recommendations.push(
+        nexusRecommendation(
+          "task",
+          "high",
+          "Приближается задача",
+          `Задача «${task.title}» запланирована на ближайшие 24 часа.`,
+          {
+            entityId: task.id,
+            action: "open-task",
+          }
+        )
+      );
+    }
+  }
+
+  return recommendations;
+};
+
+/* -------------------------
+   CALENDAR RECOMMENDATIONS
+   ------------------------- */
+
+const nexusRecommendCalendar = (
+  events: NexusCalendarEvent[],
+  now: number
+): NexusRecommendation[] => {
+  const recommendations: NexusRecommendation[] = [];
+
+  for (const event of events) {
+    const date =
+      new Date(
+        `${event.date}T${
+          event.time || "00:00"
+        }`
+      ).getTime();
+
+    if (!Number.isFinite(date)) {
+      continue;
+    }
+
+    const hours =
+      (date - now) /
+      (1000 * 60 * 60);
+
+    if (
+      hours >= 0 &&
+      hours <= 24
+    ) {
+      recommendations.push(
+        nexusRecommendation(
+          "calendar",
+          "high",
+          "Событие скоро начнётся",
+          `«${event.title}» запланировано в ближайшие 24 часа.`,
+          {
+            entityId: event.id,
+            action: "open-calendar",
+          }
+        )
+      );
+    }
+  }
+
+  return recommendations;
+};
+
+/* -------------------------
+   MEMORY RECOMMENDATIONS
+   ------------------------- */
+
+const nexusRecommendMemory = (
+  memory: NexusMemoryItem[]
+): NexusRecommendation[] => {
+  if (memory.length === 0) {
+    return [
+      nexusRecommendation(
+        "memory",
+        "low",
+        "Память пока пустая",
+        "NEXUS может постепенно запоминать полезные факты, предпочтения и цели.",
+        {
+          action: "open-memory",
+        }
+      ),
+    ];
+  }
+
+  const recent =
+    [...memory]
+      .sort(
+        (a, b) =>
+          b.createdAt -
+          a.createdAt
+      )
+      .slice(0, 3);
+
+  return recent.map(
+    (item) =>
+      nexusRecommendation(
+        "memory",
+        "low",
+        "Недавняя запись памяти",
+        item.content,
+        {
+          entityId: item.id,
+          action: "open-memory",
+        }
+      )
+  );
+};
+
+/* -------------------------
+   NOTE RECOMMENDATIONS
+   ------------------------- */
+
+const nexusRecommendNotes = (
+  notes: NexusNote[]
+): NexusRecommendation[] => {
+  const recommendations: NexusRecommendation[] = [];
+
+  const emptyNotes =
+    notes.filter(
+      (note) =>
+        !note.content?.trim()
+    );
+
+  if (
+    emptyNotes.length > 0
+  ) {
+    recommendations.push(
+      nexusRecommendation(
+        "note",
+        "low",
+        "Есть незаполненные заметки",
+        "Некоторые заметки имеют название, но пока не содержат текста.",
+        {
+          entityId:
+            emptyNotes[0].id,
+          action: "open-note",
+        }
+      )
+    );
+  }
+
+  return recommendations;
+};
+
+/* -------------------------
+   TIMER RECOMMENDATIONS
+   ------------------------- */
+
+const nexusRecommendTimers = (
+  timers: NexusTimer[]
+): NexusRecommendation[] => {
+  return timers
+    .filter(
+      (timer) =>
+        timer.running
+    )
+    .map(
+      (timer) =>
+        nexusRecommendation(
+          "timer",
+          "normal",
+          "Активный таймер",
+          `Таймер «${timer.name}» сейчас запущен.`,
+          {
+            entityId: timer.id,
+            action: "open-clock",
+          }
+        )
+    );
+};
+
+/* -------------------------
+   CHAT RECOMMENDATIONS
+   ------------------------- */
+
+const nexusRecommendChats = (
+  chats: NexusChat[]
+): NexusRecommendation[] => {
+  const recommendations: NexusRecommendation[] = [];
+
+  if (
+    chats.length === 0
+  ) {
+    recommendations.push(
+      nexusRecommendation(
+        "chat",
+        "normal",
+        "Создай первый чат",
+        "Здесь можно общаться с NEXUS.",
+        {
+          action: "create-chat",
+        }
+      )
+    );
+
+    return recommendations;
+  }
+
+  const inactive =
+    chats.filter(
+      (chat) =>
+        chat.messages.length === 0
+    );
+
+  if (
+    inactive.length > 0
+  ) {
+    recommendations.push(
+      nexusRecommendation(
+        "chat",
+        "low",
+        "Есть пустой чат",
+        "Можно начать новый разговор с NEXUS.",
+        {
+          entityId:
+            inactive[0].id,
+          action: "open-chat",
+        }
+      )
+    );
+  }
+
+  return recommendations;
+};
+
+/* -------------------------
+   SYSTEM RECOMMENDATIONS
+   ------------------------- */
+
+const nexusRecommendSystem = (
+  context: NexusRecommendationContext
+): NexusRecommendation[] => {
+  const recommendations: NexusRecommendation[] = [];
+
+  if (
+    context.tasks.length === 0
+  ) {
+    recommendations.push(
+      nexusRecommendation(
+        "system",
+        "low",
+        "Добавь задачу",
+        "NEXUS может помогать отслеживать планы и дела.",
+        {
+          action: "open-tasks",
+        }
+      )
+    );
+  }
+
+  if (
+    context.events.length === 0
+  ) {
+    recommendations.push(
+      nexusRecommendation(
+        "system",
+        "low",
+        "Запланируй событие",
+        "Добавь важные даты и планы в календарь NEXUS.",
+        {
+          action: "open-calendar",
+        }
+      )
+    );
+  }
+
+  if (
+    context.notes.length === 0
+  ) {
+    recommendations.push(
+      nexusRecommendation(
+        "system",
+        "low",
+        "Создай заметку",
+        "Используй заметки для идей и информации.",
+        {
+          action: "open-notes",
+        }
+      )
+    );
+  }
+
+  return recommendations;
+};
+
+/* -------------------------
+   MAIN RECOMMENDATION ENGINE
+   ------------------------- */
+
+const nexusGenerateRecommendations = (
+  context: NexusRecommendationContext
+): NexusRecommendation[] => {
+  const now =
+    context.now ??
+    Date.now();
+
+  const recommendations = [
+    ...nexusRecommendTasks(
+      context.tasks,
+      now
+    ),
+
+    ...nexusRecommendCalendar(
+      context.events,
+      now
+    ),
+
+    ...nexusRecommendMemory(
+      context.memory
+    ),
+
+    ...nexusRecommendNotes(
+      context.notes
+    ),
+
+    ...nexusRecommendTimers(
+      context.timers
+    ),
+
+    ...nexusRecommendChats(
+      context.chats
+    ),
+
+    ...nexusRecommendSystem(
+      context
+    ),
+  ];
+
+  return recommendations
+    .filter(
+      (item) =>
+        !item.expiresAt ||
+        item.expiresAt > now
+    )
+    .sort((a, b) => {
+      const priority = {
+        high: 3,
+        normal: 2,
+        low: 1,
+      };
+
+      return (
+        priority[b.priority] -
+        priority[a.priority]
+      );
+    })
+    .slice(0, 20);
+};
+
+/* -------------------------
+   DEDUPLICATION
+   ------------------------- */
+
+const nexusDeduplicateRecommendations = (
+  recommendations: NexusRecommendation[]
+): NexusRecommendation[] => {
+  const seen =
+    new Set<string>();
+
+  return recommendations.filter(
+    (item) => {
+      const key =
+        `${item.type}:${item.title}:${item.entityId ?? ""}`;
+
+      if (seen.has(key)) {
+        return false;
+      }
+
+      seen.add(key);
+
+      return true;
+    }
+  );
+};
+
+/* -------------------------
+   FILTER BY PRIORITY
+   ------------------------- */
+
+const nexusRecommendationsByPriority = (
+  recommendations: NexusRecommendation[],
+  priority: NexusRecommendationPriority
+): NexusRecommendation[] =>
+  recommendations.filter(
+    (item) =>
+      item.priority ===
+      priority
+  );
+
+/* -------------------------
+   FILTER BY TYPE
+   ------------------------- */
+
+const nexusRecommendationsByType = (
+  recommendations: NexusRecommendation[],
+  type: NexusRecommendationType
+): NexusRecommendation[] =>
+  recommendations.filter(
+    (item) =>
+      item.type === type
+  );
+
+/* -------------------------
+   AI SUMMARY
+   ------------------------- */
+
+const nexusRecommendationsSummary = (
+  recommendations: NexusRecommendation[]
+): string => {
+  if (
+    recommendations.length === 0
+  ) {
+    return "Сейчас нет активных рекомендаций.";
+  }
+
+  const important =
+    recommendations.filter(
+      (item) =>
+        item.priority === "high"
+    );
+
+  if (
+    important.length > 0
+  ) {
+    return important
+      .slice(0, 3)
+      .map(
+        (item) =>
+          `${item.title}: ${item.description}`
+      )
+      .join("\n");
+  }
+
+  return recommendations
+    .slice(0, 5)
+    .map(
+      (item) =>
+        `${item.title}: ${item.description}`
+    )
+    .join("\n");
+};
+
+/* -------------------------
+   STORAGE
+   ------------------------- */
+
+const nexusRecommendationStorageKey =
+  "nexus_recommendations_v1";
+
+const nexusSaveRecommendations = (
+  recommendations: NexusRecommendation[]
+): boolean => {
+  if (
+    typeof window ===
+    "undefined"
+  ) {
+    return false;
+  }
+
+  try {
+    localStorage.setItem(
+      nexusRecommendationStorageKey,
+      JSON.stringify(
+        recommendations
+      )
+    );
+
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const nexusLoadRecommendations =
+  (): NexusRecommendation[] => {
+    if (
+      typeof window ===
+      "undefined"
+    ) {
+      return [];
+    }
+
+    try {
+      const raw =
+        localStorage.getItem(
+          nexusRecommendationStorageKey
+        );
+
+      if (!raw) {
+        return [];
+      }
+
+      const parsed: unknown =
+        JSON.parse(raw);
+
+      if (!Array.isArray(parsed)) {
+        return [];
+      }
+
+      return parsed as NexusRecommendation[];
+    } catch {
+      return [];
+    }
+  };
+
+const nexusClearRecommendations =
+  (): boolean => {
+    if (
+      typeof window ===
+      "undefined"
+    ) {
+      return false;
+    }
+
+    try {
+      localStorage.removeItem(
+        nexusRecommendationStorageKey
+      );
+
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+/* -------------------------
+   ENGINE
+   ------------------------- */
+
+const NEXUS_RECOMMENDATION_ENGINE = {
+  generate:
+    nexusGenerateRecommendations,
+
+  deduplicate:
+    nexusDeduplicateRecommendations,
+
+  byPriority:
+    nexusRecommendationsByPriority,
+
+  byType:
+    nexusRecommendationsByType,
+
+  summary:
+    nexusRecommendationsSummary,
+
+  save:
+    nexusSaveRecommendations,
+
+  load:
+    nexusLoadRecommendations,
+
+  clear:
+    nexusClearRecommendations
+};
+
+registerNexusModule({
+  id: "recommendation-engine",
+  name: "Smart Recommendation Engine",
+  version: "1.0.0",
+  description:
+    "Формирует контекстные рекомендации на основе задач, календаря, памяти, заметок, таймеров и активности.",
+  enabled: true
+});
+
+/* =========================================================
+   PART 23 COMPLETE
+   ========================================================= */
+/* =========================================================
+   NEXUS — PART 24
+   CENTRAL APP STATE MANAGER
+   ========================================================= */
+
+type NexusAppSnapshot = {
+  chats: NexusChat[];
+  memory: NexusMemoryItem[];
+  notes: NexusNote[];
+  tasks: NexusTask[];
+  events: NexusCalendarEvent[];
+  timers: NexusTimer[];
+  files: NexusFile[];
+  settings?: Partial<NexusUserSettings>;
+  analytics?: NexusAnalyticsEvent[];
+  savedAt: number;
+};
+
+type NexusStatePatch = Partial<NexusAppSnapshot>;
+
+type NexusStateHistoryItem = {
+  id: string;
+  timestamp: number;
+  label: string;
+  state: NexusAppSnapshot;
+};
+
+type NexusStateManager = {
+  getState: () => NexusAppSnapshot;
+  setState: (state: NexusAppSnapshot) => void;
+  patch: (patch: NexusStatePatch) => void;
+  reset: () => void;
+  undo: () => boolean;
+  redo: () => boolean;
+  saveSnapshot: (label: string) => void;
+  history: () => NexusStateHistoryItem[];
+};
+
+const nexusClone = <T,>(
+  value: T
+): T => {
+  try {
+    return JSON.parse(
+      JSON.stringify(value)
+    ) as T;
+  } catch {
+    return value;
+  }
+};
+
+const nexusCreateEmptySnapshot =
+  (): NexusAppSnapshot => ({
+    chats: [],
+    memory: [],
+    notes: [],
+    tasks: [],
+    events: [],
+    timers: [],
+    files: [],
+    settings: {},
+    analytics: [],
+    savedAt: Date.now()
+  });
+
+const nexusStateStorageKey =
+  "nexus_central_state_v1";
+
+let nexusCentralState =
+  nexusCreateEmptySnapshot();
+
+let nexusUndoStack:
+  NexusStateHistoryItem[] = [];
+
+let nexusRedoStack:
+  NexusStateHistoryItem[] = [];
+
+const nexusStateHistoryLimit = 50;
+
+const nexusCreateHistoryItem = (
+  label: string,
+  state: NexusAppSnapshot
+): NexusStateHistoryItem => ({
+  id: `state_${Date.now()}_${Math.random()
+    .toString(36)
+    .slice(2, 9)}`,
+  timestamp: Date.now(),
+  label,
+  state: nexusClone(state)
+});
+
+const nexusPushUndo = (
+  label: string
+) => {
+  nexusUndoStack.push(
+    nexusCreateHistoryItem(
+      label,
+      nexusCentralState
+    )
+  );
+
+  if (
+    nexusUndoStack.length >
+    nexusStateHistoryLimit
+  ) {
+    nexusUndoStack.shift();
+  }
+
+  nexusRedoStack = [];
+};
+
+const nexusStateGet =
+  (): NexusAppSnapshot =>
+    nexusClone(
+      nexusCentralState
+    );
+
+const nexusStateSet = (
+  state: NexusAppSnapshot
+) => {
+  nexusPushUndo("Изменение состояния");
+
+  nexusCentralState =
+    nexusClone({
+      ...state,
+      savedAt: Date.now()
+    });
+};
+
+const nexusStatePatch = (
+  patch: NexusStatePatch
+) => {
+  nexusPushUndo("Обновление состояния");
+
+  nexusCentralState =
+    nexusClone({
+      ...nexusCentralState,
+      ...patch,
+      savedAt: Date.now()
+    });
+};
+
+const nexusStateSaveSnapshot = (
+  label: string
+) => {
+  nexusPushUndo(label);
+};
+
+const nexusStateUndo = (): boolean => {
+  const previous =
+    nexusUndoStack.pop();
+
+  if (!previous) {
+    return false;
+  }
+
+  nexusRedoStack.push(
+    nexusCreateHistoryItem(
+      "Отмена изменения",
+      nexusCentralState
+    )
+  );
+
+  nexusCentralState =
+    nexusClone(
+      previous.state
+    );
+
+  return true;
+};
+
+const nexusStateRedo = (): boolean => {
+  const next =
+    nexusRedoStack.pop();
+
+  if (!next) {
+    return false;
+  }
+
+  nexusUndoStack.push(
+    nexusCreateHistoryItem(
+      "Повтор изменения",
+      nexusCentralState
+    )
+  );
+
+  nexusCentralState =
+    nexusClone(
+      next.state
+    );
+
+  return true;
+};
+
+const nexusStateReset = () => {
+  nexusPushUndo(
+    "Сброс состояния"
+  );
+
+  nexusCentralState =
+    nexusCreateEmptySnapshot();
+
+  nexusRedoStack = [];
+};
+
+const nexusStateHistory =
+  (): NexusStateHistoryItem[] => [
+    ...nexusUndoStack
+  ].reverse();
+
+const nexusStateRedoHistory =
+  (): NexusStateHistoryItem[] => [
+    ...nexusRedoStack
+  ].reverse();
+
+const nexusStateCanUndo =
+  (): boolean =>
+    nexusUndoStack.length > 0;
+
+const nexusStateCanRedo =
+  (): boolean =>
+    nexusRedoStack.length > 0;
+
+/* -------------------------
+   ENTITY ACCESS
+   ------------------------- */
+
+const nexusStateChats =
+  (): NexusChat[] =>
+    nexusCentralState.chats;
+
+const nexusStateMemory =
+  (): NexusMemoryItem[] =>
+    nexusCentralState.memory;
+
+const nexusStateNotes =
+  (): NexusNote[] =>
+    nexusCentralState.notes;
+
+const nexusStateTasks =
+  (): NexusTask[] =>
+    nexusCentralState.tasks;
+
+const nexusStateEvents =
+  (): NexusCalendarEvent[] =>
+    nexusCentralState.events;
+
+const nexusStateTimers =
+  (): NexusTimer[] =>
+    nexusCentralState.timers;
+
+const nexusStateFiles =
+  (): NexusFile[] =>
+    nexusCentralState.files;
+
+/* -------------------------
+   ENTITY UPDATE HELPERS
+   ------------------------- */
+
+const nexusStateUpdateChats = (
+  updater:
+    | NexusChat[]
+    | ((
+        chats: NexusChat[]
+      ) => NexusChat[])
+) => {
+  nexusPushUndo(
+    "Обновление чатов"
+  );
+
+  const next =
+    typeof updater ===
+    "function"
+      ? updater(
+          nexusCentralState.chats
+        )
+      : updater;
+
+  nexusCentralState = {
+    ...nexusCentralState,
+    chats: nexusClone(next),
+    savedAt: Date.now()
+  };
+};
+
+const nexusStateUpdateMemory = (
+  updater:
+    | NexusMemoryItem[]
+    | ((
+        memory: NexusMemoryItem[]
+      ) => NexusMemoryItem[])
+) => {
+  nexusPushUndo(
+    "Обновление памяти"
+  );
+
+  const next =
+    typeof updater ===
+    "function"
+      ? updater(
+          nexusCentralState.memory
+        )
+      : updater;
+
+  nexusCentralState = {
+    ...nexusCentralState,
+    memory: nexusClone(next),
+    savedAt: Date.now()
+  };
+};
+
+const nexusStateUpdateNotes = (
+  updater:
+    | NexusNote[]
+    | ((
+        notes: NexusNote[]
+      ) => NexusNote[])
+) => {
+  nexusPushUndo(
+    "Обновление заметок"
+  );
+
+  const next =
+    typeof updater ===
+    "function"
+      ? updater(
+          nexusCentralState.notes
+        )
+      : updater;
+
+  nexusCentralState = {
+    ...nexusCentralState,
+    notes: nexusClone(next),
+    savedAt: Date.now()
+  };
+};
+
+const nexusStateUpdateTasks = (
+  updater:
+    | NexusTask[]
+    | ((
+        tasks: NexusTask[]
+      ) => NexusTask[])
+) => {
+  nexusPushUndo(
+    "Обновление задач"
+  );
+
+  const next =
+    typeof updater ===
+    "function"
+      ? updater(
+          nexusCentralState.tasks
+        )
+      : updater;
+
+  nexusCentralState = {
+    ...nexusCentralState,
+    tasks: nexusClone(next),
+    savedAt: Date.now()
+  };
+};
+
+const nexusStateUpdateEvents = (
+  updater:
+    | NexusCalendarEvent[]
+    | ((
+        events: NexusCalendarEvent[]
+      ) => NexusCalendarEvent[])
+) => {
+  nexusPushUndo(
+    "Обновление календаря"
+  );
+
+  const next =
+    typeof updater ===
+    "function"
+      ? updater(
+          nexusCentralState.events
+        )
+      : updater;
+
+  nexusCentralState = {
+    ...nexusCentralState,
+    events: nexusClone(next),
+    savedAt: Date.now()
+  };
+};
+
+const nexusStateUpdateTimers = (
+  updater:
+    | NexusTimer[]
+    | ((
+        timers: NexusTimer[]
+      ) => NexusTimer[])
+) => {
+  nexusPushUndo(
+    "Обновление таймеров"
+  );
+
+  const next =
+    typeof updater ===
+    "function"
+      ? updater(
+          nexusCentralState.timers
+        )
+      : updater;
+
+  nexusCentralState = {
+    ...nexusCentralState,
+    timers: nexusClone(next),
+    savedAt: Date.now()
+  };
+};
+
+const nexusStateUpdateFiles = (
+  updater:
+    | NexusFile[]
+    | ((
+        files: NexusFile[]
+      ) => NexusFile[])
+) => {
+  nexusPushUndo(
+    "Обновление файлов"
+  );
+
+  const next =
+    typeof updater ===
+    "function"
+      ? updater(
+          nexusCentralState.files
+        )
+      : updater;
+
+  nexusCentralState = {
+    ...nexusCentralState,
+    files: nexusClone(next),
+    savedAt: Date.now()
+  };
+};
+
+/* -------------------------
+   SAVE / LOAD
+   ------------------------- */
+
+const nexusStateSave = (): boolean => {
+  if (
+    typeof window ===
+    "undefined"
+  ) {
+    return false;
+  }
+
+  try {
+    localStorage.setItem(
+      nexusStateStorageKey,
+      JSON.stringify(
+        nexusCentralState
+      )
+    );
+
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const nexusStateLoad = (): boolean => {
+  if (
+    typeof window ===
+    "undefined"
+  ) {
+    return false;
+  }
+
+  try {
+    const raw =
+      localStorage.getItem(
+        nexusStateStorageKey
+      );
+
+    if (!raw) {
+      return false;
+    }
+
+    const parsed: unknown =
+      JSON.parse(raw);
+
+    if (
+      !parsed ||
+      typeof parsed !==
+        "object"
+    ) {
+      return false;
+    }
+
+    const state =
+      parsed as NexusAppSnapshot;
+
+    nexusCentralState =
+      nexusClone({
+        ...nexusCreateEmptySnapshot(),
+        ...state,
+        savedAt: Date.now()
+      });
+
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const nexusStateClearStorage =
+  (): boolean => {
+    if (
+      typeof window ===
+      "undefined"
+    ) {
+      return false;
+    }
+
+    try {
+      localStorage.removeItem(
+        nexusStateStorageKey
+      );
+
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+/* -------------------------
+   STATE STATISTICS
+   ------------------------- */
+
+const nexusStateStatistics = () => {
+  const state =
+    nexusCentralState;
+
+  return {
+    chats:
+      state.chats.length,
+
+    messages:
+      state.chats.reduce(
+        (sum, chat) =>
+          sum +
+          chat.messages.length,
+        0
+      ),
+
+    memory:
+      state.memory.length,
+
+    notes:
+      state.notes.length,
+
+    tasks:
+      state.tasks.length,
+
+    events:
+      state.events.length,
+
+    timers:
+      state.timers.length,
+
+    files:
+      state.files.length,
+
+    analytics:
+      state.analytics?.length ?? 0,
+
+    undoAvailable:
+      nexusUndoStack.length,
+
+    redoAvailable:
+      nexusRedoStack.length,
+
+    lastSaved:
+      state.savedAt
+  };
+};
+
+/* -------------------------
+   MANAGER
+   ------------------------- */
+
+const NEXUS_STATE_MANAGER:
+  NexusStateManager & {
+    redo: () => boolean;
+    canUndo: () => boolean;
+    canRedo: () => boolean;
+    redoHistory: () =>
+      NexusStateHistoryItem[];
+    save: () => boolean;
+    load: () => boolean;
+    clearStorage: () => boolean;
+    statistics: () => ReturnType<
+      typeof nexusStateStatistics
+    >;
+    updateChats: typeof nexusStateUpdateChats;
+    updateMemory: typeof nexusStateUpdateMemory;
+    updateNotes: typeof nexusStateUpdateNotes;
+    updateTasks: typeof nexusStateUpdateTasks;
+    updateEvents: typeof nexusStateUpdateEvents;
+    updateTimers: typeof nexusStateUpdateTimers;
+    updateFiles: typeof nexusStateUpdateFiles;
+  } = {
+  getState:
+    nexusStateGet,
+
+  setState:
+    nexusStateSet,
+
+  patch:
+    nexusStatePatch,
+
+  reset:
+    nexusStateReset,
+
+  undo:
+    nexusStateUndo,
+
+  redo:
+    nexusStateRedo,
+
+  saveSnapshot:
+    nexusStateSaveSnapshot,
+
+  history:
+    nexusStateHistory,
+
+  canUndo:
+    nexusStateCanUndo,
+
+  canRedo:
+    nexusStateCanRedo,
+
+  redoHistory:
+    nexusStateRedoHistory,
+
+  save:
+    nexusStateSave,
+
+  load:
+    nexusStateLoad,
+
+  clearStorage:
+    nexusStateClearStorage,
+
+  statistics:
+    nexusStateStatistics,
+
+  updateChats:
+    nexusStateUpdateChats,
+
+  updateMemory:
+    nexusStateUpdateMemory,
+
+  updateNotes:
+    nexusStateUpdateNotes,
+
+  updateTasks:
+    nexusStateUpdateTasks,
+
+  updateEvents:
+    nexusStateUpdateEvents,
+
+  updateTimers:
+    nexusStateUpdateTimers,
+
+  updateFiles:
+    nexusStateUpdateFiles
+};
+
+registerNexusModule({
+  id: "central-state-manager",
+  name: "NEXUS Central State Manager",
+  version: "1.0.0",
+  description:
+    "Единое управление состоянием NEXUS, историей изменений, undo/redo и сохранением.",
+  enabled: true
+});
+
+/* =========================================================
+   PART 24 COMPLETE
+   ========================================================= */
