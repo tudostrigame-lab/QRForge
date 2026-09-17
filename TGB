@@ -20524,3 +20524,4233 @@ function nexusTranslateMany(
     {}
   );
 }
+// ============================================================
+// NEXUS — PART 31
+// ALARM SCHEDULER & NOTIFICATION QUEUE ENGINE
+// ============================================================
+
+type NexusAlarmRepeat =
+  | "once"
+  | "daily"
+  | "weekdays"
+  | "weekends"
+  | "weekly";
+
+type NexusAlarm = {
+  id: string;
+  title: string;
+  time: string;
+  enabled: boolean;
+  repeat: NexusAlarmRepeat;
+  days?: number[];
+  createdAt: number;
+  lastTriggeredAt?: number;
+};
+
+type NexusNotificationPriority =
+  | "low"
+  | "normal"
+  | "high"
+  | "critical";
+
+type NexusNotificationItem = {
+  id: string;
+  title: string;
+  message: string;
+  priority: NexusNotificationPriority;
+  createdAt: number;
+  scheduledFor?: number;
+  read: boolean;
+  delivered: boolean;
+  type:
+    | "alarm"
+    | "timer"
+    | "task"
+    | "calendar"
+    | "system"
+    | "ai";
+};
+
+type NexusNotificationQueue = {
+  items: NexusNotificationItem[];
+};
+
+const nexusNotificationQueue: NexusNotificationQueue = {
+  items: [],
+};
+
+function nexusCreateAlarm(
+  title: string,
+  time: string,
+  repeat: NexusAlarmRepeat = "once",
+  days?: number[]
+): NexusAlarm {
+  return {
+    id:
+      typeof createId === "function"
+        ? createId()
+        : `alarm_${Date.now()}_${Math.random()
+            .toString(36)
+            .slice(2, 9)}`,
+    title: title.trim() || "NEXUS Alarm",
+    time,
+    enabled: true,
+    repeat,
+    days,
+    createdAt: Date.now(),
+  };
+}
+
+function nexusIsValidAlarmTime(
+  value: string
+): boolean {
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(
+    value
+  );
+}
+
+function nexusAlarmMatchesDate(
+  alarm: NexusAlarm,
+  date: Date
+): boolean {
+  if (!alarm.enabled) {
+    return false;
+  }
+
+  switch (alarm.repeat) {
+    case "daily":
+      return true;
+
+    case "weekdays":
+      return (
+        date.getDay() >= 1 &&
+        date.getDay() <= 5
+      );
+
+    case "weekends":
+      return (
+        date.getDay() === 0 ||
+        date.getDay() === 6
+      );
+
+    case "weekly":
+      if (!alarm.days?.length) {
+        return false;
+      }
+
+      return alarm.days.includes(
+        date.getDay()
+      );
+
+    case "once":
+    default:
+      return true;
+  }
+}
+
+function nexusGetAlarmTimestamp(
+  alarm: NexusAlarm,
+  baseDate: Date = new Date()
+): number | null {
+  if (
+    !alarm.enabled ||
+    !nexusIsValidAlarmTime(alarm.time)
+  ) {
+    return null;
+  }
+
+  const [hours, minutes] =
+    alarm.time.split(":").map(Number);
+
+  const target = new Date(baseDate);
+
+  target.setHours(
+    hours,
+    minutes,
+    0,
+    0
+  );
+
+  if (
+    !nexusAlarmMatchesDate(
+      alarm,
+      target
+    )
+  ) {
+    return null;
+  }
+
+  return target.getTime();
+}
+
+function nexusShouldTriggerAlarm(
+  alarm: NexusAlarm,
+  now: Date = new Date()
+): boolean {
+  if (!alarm.enabled) {
+    return false;
+  }
+
+  const timestamp =
+    nexusGetAlarmTimestamp(
+      alarm,
+      now
+    );
+
+  if (timestamp === null) {
+    return false;
+  }
+
+  const current =
+    now.getTime();
+
+  const difference =
+    Math.abs(current - timestamp);
+
+  if (difference > 30000) {
+    return false;
+  }
+
+  if (
+    alarm.lastTriggeredAt &&
+    current - alarm.lastTriggeredAt <
+      45000
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+function nexusTriggerAlarm(
+  alarm: NexusAlarm,
+  now: Date = new Date()
+): NexusNotificationItem {
+  alarm.lastTriggeredAt =
+    now.getTime();
+
+  const notification: NexusNotificationItem =
+    {
+      id:
+        typeof createId === "function"
+          ? createId()
+          : `notification_${Date.now()}`,
+      title: alarm.title,
+      message: `Alarm: ${alarm.time}`,
+      priority: "high",
+      createdAt: Date.now(),
+      read: false,
+      delivered: false,
+      type: "alarm",
+    };
+
+  nexusNotificationQueue.items.push(
+    notification
+  );
+
+  if (
+    typeof window !== "undefined" &&
+    "Notification" in window &&
+    Notification.permission === "granted"
+  ) {
+    try {
+      new Notification(
+        alarm.title,
+        {
+          body: notification.message,
+          tag: notification.id,
+        }
+      );
+
+      notification.delivered = true;
+    } catch {
+      notification.delivered = false;
+    }
+  }
+
+  return notification;
+}
+
+function nexusAddNotification(
+  title: string,
+  message: string,
+  type:
+    | "alarm"
+    | "timer"
+    | "task"
+    | "calendar"
+    | "system"
+    | "ai" = "system",
+  priority: NexusNotificationPriority = "normal",
+  scheduledFor?: number
+): NexusNotificationItem {
+  const item: NexusNotificationItem =
+    {
+      id:
+        typeof createId === "function"
+          ? createId()
+          : `notification_${Date.now()}_${Math.random()
+              .toString(36)
+              .slice(2, 8)}`,
+      title,
+      message,
+      priority,
+      createdAt: Date.now(),
+      scheduledFor,
+      read: false,
+      delivered: false,
+      type,
+    };
+
+  nexusNotificationQueue.items.push(
+    item
+  );
+
+  return item;
+}
+
+function nexusGetNotifications(
+  unreadOnly = false
+): NexusNotificationItem[] {
+  return nexusNotificationQueue.items
+    .filter(
+      item =>
+        !unreadOnly ||
+        !item.read
+    )
+    .sort(
+      (a, b) =>
+        b.createdAt -
+        a.createdAt
+    );
+}
+
+function nexusMarkNotificationRead(
+  id: string
+): boolean {
+  const item =
+    nexusNotificationQueue.items.find(
+      notification =>
+        notification.id === id
+    );
+
+  if (!item) {
+    return false;
+  }
+
+  item.read = true;
+  return true;
+}
+
+function nexusMarkAllNotificationsRead(): void {
+  nexusNotificationQueue.items.forEach(
+    item => {
+      item.read = true;
+    }
+  );
+}
+
+function nexusRemoveNotification(
+  id: string
+): boolean {
+  const index =
+    nexusNotificationQueue.items.findIndex(
+      item =>
+        item.id === id
+    );
+
+  if (index === -1) {
+    return false;
+  }
+
+  nexusNotificationQueue.items.splice(
+    index,
+    1
+  );
+
+  return true;
+}
+
+function nexusClearNotifications(): void {
+  nexusNotificationQueue.items.length = 0;
+}
+
+function nexusGetUnreadNotificationCount(): number {
+  return nexusNotificationQueue.items.filter(
+    item => !item.read
+  ).length;
+}
+
+function nexusProcessNotificationQueue(
+  now: Date = new Date()
+): NexusNotificationItem[] {
+  const delivered: NexusNotificationItem[] =
+    [];
+
+  for (
+    const item of nexusNotificationQueue.items
+  ) {
+    if (
+      item.delivered ||
+      !item.scheduledFor ||
+      item.scheduledFor > now.getTime()
+    ) {
+      continue;
+    }
+
+    item.delivered = true;
+
+    if (
+      typeof window !== "undefined" &&
+      "Notification" in window &&
+      Notification.permission ===
+        "granted"
+    ) {
+      try {
+        new Notification(
+          item.title,
+          {
+            body: item.message,
+            tag: item.id,
+          }
+        );
+      } catch {
+        // Browser notification unavailable.
+      }
+    }
+
+    delivered.push(item);
+  }
+
+  return delivered;
+}
+
+function nexusRequestNotificationPermission(): Promise<boolean> {
+  if (
+    typeof window === "undefined" ||
+    !("Notification" in window)
+  ) {
+    return Promise.resolve(false);
+  }
+
+  if (
+    Notification.permission ===
+    "granted"
+  ) {
+    return Promise.resolve(true);
+  }
+
+  if (
+    Notification.permission ===
+    "denied"
+  ) {
+    return Promise.resolve(false);
+  }
+
+  return Notification.requestPermission().then(
+    permission =>
+      permission === "granted"
+  );
+}
+
+function nexusCreateTaskNotification(
+  title: string,
+  dueTimestamp: number
+): NexusNotificationItem {
+  return nexusAddNotification(
+    "Task reminder",
+    title,
+    "task",
+    "normal",
+    dueTimestamp
+  );
+}
+
+function nexusCreateCalendarNotification(
+  title: string,
+  eventTimestamp: number
+): NexusNotificationItem {
+  return nexusAddNotification(
+    "Calendar reminder",
+    title,
+    "calendar",
+    "high",
+    eventTimestamp
+  );
+}
+
+function nexusCreateTimerNotification(
+  title: string
+): NexusNotificationItem {
+  return nexusAddNotification(
+    "Timer finished",
+    title,
+    "timer",
+    "high"
+  );
+}
+
+function nexusGetNextAlarm(
+  alarms: NexusAlarm[],
+  from: Date = new Date()
+): NexusAlarm | null {
+  let closest:
+    | NexusAlarm
+    | null = null;
+
+  let closestTimestamp =
+    Infinity;
+
+  for (
+    const alarm of alarms
+  ) {
+    if (!alarm.enabled) {
+      continue;
+    }
+
+    const candidate =
+      nexusGetAlarmTimestamp(
+        alarm,
+        from
+      );
+
+    if (
+      candidate !== null &&
+      candidate >= from.getTime() &&
+      candidate < closestTimestamp
+    ) {
+      closest = alarm;
+      closestTimestamp = candidate;
+    }
+  }
+
+  return closest;
+}
+
+function nexusSortAlarms(
+  alarms: NexusAlarm[]
+): NexusAlarm[] {
+  return [...alarms].sort(
+    (a, b) =>
+      a.time.localeCompare(
+        b.time
+      )
+  );
+}
+
+function nexusDisableAlarm(
+  alarm: NexusAlarm
+): NexusAlarm {
+  return {
+    ...alarm,
+    enabled: false,
+  };
+}
+
+function nexusEnableAlarm(
+  alarm: NexusAlarm
+): NexusAlarm {
+  return {
+    ...alarm,
+    enabled: true,
+  };
+}
+
+function nexusToggleAlarm(
+  alarm: NexusAlarm
+): NexusAlarm {
+  return {
+    ...alarm,
+    enabled: !alarm.enabled,
+  };
+}
+// ============================================================
+// NEXUS — PART 32
+// SMART ALARM PARSER & NATURAL LANGUAGE SCHEDULER
+// ============================================================
+
+type NexusParsedAlarm = {
+  title: string;
+  time: string | null;
+  repeat: NexusAlarmRepeat;
+  days: number[];
+  confidence: number;
+};
+
+const nexusWeekdayMap: Record<
+  string,
+  number
+> = {
+  sunday: 0,
+  monday: 1,
+  tuesday: 2,
+  wednesday: 3,
+  thursday: 4,
+  friday: 5,
+  saturday: 6,
+
+  domingo: 0,
+  lunes: 1,
+  martes: 2,
+  miércoles: 3,
+  miercoles: 3,
+  jueves: 4,
+  viernes: 5,
+  sábado: 6,
+  sabado: 6,
+
+  dimanche: 0,
+  lundi: 1,
+  mardi: 2,
+  mercredi: 3,
+  jeudi: 4,
+  vendredi: 5,
+  samedi: 6,
+
+  日曜日: 0,
+  月曜日: 1,
+  火曜日: 2,
+  水曜日: 3,
+  木曜日: 4,
+  金曜日: 5,
+  土曜日: 6,
+};
+
+function nexusParseAlarmTime(
+  text: string
+): string | null {
+  const normalized = text
+    .trim()
+    .toLowerCase();
+
+  const direct =
+    normalized.match(
+      /\b([01]?\d|2[0-3])[:.]([0-5]\d)\b/
+    );
+
+  if (direct) {
+    const hours =
+      Number(direct[1]);
+    const minutes =
+      Number(direct[2]);
+
+    return `${String(hours).padStart(
+      2,
+      "0"
+    )}:${String(minutes).padStart(
+      2,
+      "0"
+    )}`;
+  }
+
+  const hourOnly =
+    normalized.match(
+      /\b(?:at|в|в\s|a las|à|à\s|at\s)?([0-2]?\d)\s*(?:h|час(?:а|ов)?|hours?|horas?|heure?s?|時)?\b/i
+    );
+
+  if (hourOnly) {
+    let hours =
+      Number(hourOnly[1]);
+
+    if (
+      hours >= 0 &&
+      hours <= 23
+    ) {
+      const isPm =
+        /\b(pm|p\.m\.|вечера|дня|de la tarde)\b/i.test(
+          normalized
+        );
+
+      const isAm =
+        /\b(am|a\.m\.|утра|de la mañana)\b/i.test(
+          normalized
+        );
+
+      if (
+        isPm &&
+        hours < 12
+      ) {
+        hours += 12;
+      }
+
+      if (
+        isAm &&
+        hours === 12
+      ) {
+        hours = 0;
+      }
+
+      return `${String(hours).padStart(
+        2,
+        "0"
+      )}:00`;
+    }
+  }
+
+  return null;
+}
+
+function nexusDetectAlarmRepeat(
+  text: string
+): NexusAlarmRepeat {
+  const normalized =
+    text.toLowerCase();
+
+  if (
+    /every\s*day|daily|каждый\s*день|ежедневно|todos\s*los\s*días|tous\s*les\s*jours|毎日/i.test(
+      normalized
+    )
+  ) {
+    return "daily";
+  }
+
+  if (
+    /weekdays|working\s*days|будни|по\s*будням|días\s*laborables|jours\s*de\s*semaine|平日/i.test(
+      normalized
+    )
+  ) {
+    return "weekdays";
+  }
+
+  if (
+    /weekends|выходные|по\s*выходным|fines\s*de\s*semana|week-ends|週末/i.test(
+      normalized
+    )
+  ) {
+    return "weekends";
+  }
+
+  if (
+    /every\s*week|weekly|каждую\s*неделю|еженедельно|cada\s*semana|chaque\s*semaine|毎週/i.test(
+      normalized
+    )
+  ) {
+    return "weekly";
+  }
+
+  return "once";
+}
+
+function nexusDetectAlarmDays(
+  text: string
+): number[] {
+  const normalized =
+    text
+      .toLowerCase()
+      .replace(/[.,!?]/g, " ");
+
+  const detected =
+    new Set<number>();
+
+  for (
+    const [name, day] of Object.entries(
+      nexusWeekdayMap
+    )
+  ) {
+    if (
+      normalized.includes(name)
+    ) {
+      detected.add(day);
+    }
+  }
+
+  return Array.from(
+    detected
+  ).sort();
+}
+
+function nexusExtractAlarmTitle(
+  text: string
+): string {
+  let title =
+    text.trim();
+
+  title = title.replace(
+    /\b([01]?\d|2[0-3])[:.]([0-5]\d)\b/g,
+    ""
+  );
+
+  title = title.replace(
+    /\b(?:at|в|a las|à|pour|на)\b/gi,
+    ""
+  );
+
+  title = title.replace(
+    /\b(?:every\s*day|daily|каждый\s*день|ежедневно|todos\s*los\s*días|tous\s*les\s*jours|毎日)\b/gi,
+    ""
+  );
+
+  title = title.replace(
+    /\b(?:weekdays|будни|по\s*будням|weekends|выходные|по\s*выходным|weekly|еженедельно)\b/gi,
+    ""
+  );
+
+  title = title.replace(
+    /\s+/g,
+    " "
+  );
+
+  title = title
+    .replace(
+      /^[\s,:;-]+/,
+      ""
+    )
+    .replace(
+      /[\s,:;-]+$/,
+      ""
+    );
+
+  if (
+    !title ||
+    title.length < 2
+  ) {
+    return "NEXUS Alarm";
+  }
+
+  return title;
+}
+
+function nexusParseNaturalAlarm(
+  text: string
+): NexusParsedAlarm {
+  const time =
+    nexusParseAlarmTime(text);
+
+  const repeat =
+    nexusDetectAlarmRepeat(text);
+
+  const days =
+    nexusDetectAlarmDays(text);
+
+  let confidence = 0;
+
+  if (time) {
+    confidence += 0.6;
+  }
+
+  if (
+    repeat !== "once"
+  ) {
+    confidence += 0.2;
+  }
+
+  if (days.length > 0) {
+    confidence += 0.2;
+  }
+
+  return {
+    title:
+      nexusExtractAlarmTitle(
+        text
+      ),
+    time,
+    repeat,
+    days,
+    confidence: Math.min(
+      confidence,
+      1
+    ),
+  };
+}
+
+function nexusAlarmFromNaturalLanguage(
+  text: string
+): NexusAlarm | null {
+  const parsed =
+    nexusParseNaturalAlarm(text);
+
+  if (
+    !parsed.time ||
+    parsed.confidence < 0.6
+  ) {
+    return null;
+  }
+
+  return nexusCreateAlarm(
+    parsed.title,
+    parsed.time,
+    parsed.repeat,
+    parsed.days
+  );
+}
+
+function nexusDescribeAlarm(
+  alarm: NexusAlarm,
+  language?: string
+): string {
+  const code =
+    nexusNormalizeLanguage(
+      language
+    );
+
+  if (code === "ru") {
+    return `Будильник «${alarm.title}» на ${alarm.time}`;
+  }
+
+  if (code === "es") {
+    return `Alarma «${alarm.title}» a las ${alarm.time}`;
+  }
+
+  if (code === "fr") {
+    return `Alarme «${alarm.title}» à ${alarm.time}`;
+  }
+
+  if (code === "ja") {
+    return `「${alarm.title}」のアラーム ${alarm.time}`;
+  }
+
+  return `Alarm "${alarm.title}" at ${alarm.time}`;
+}
+
+function nexusIsAlarmCommand(
+  text: string
+): boolean {
+  return /(?:alarm|alarma|alarme|アラーム|будильник)/i.test(
+    text
+  );
+}
+
+function nexusIsDisableAlarmCommand(
+  text: string
+): boolean {
+  return /(?:disable|turn\s*off|cancel|stop|delete|отключи|выключи|отмени|удали|desactivar|cancelar|supprimer|désactiver|停止|削除)/i.test(
+    text
+  );
+}
+
+function nexusIsEnableAlarmCommand(
+  text: string
+): boolean {
+  return /(?:enable|turn\s*on|activate|включи|активируй|включить|activar|activer|有効)/i.test(
+    text
+  );
+}
+
+function nexusFindAlarm(
+  alarms: NexusAlarm[],
+  text: string
+): NexusAlarm | null {
+  const normalized =
+    text.toLowerCase();
+
+  const time =
+    nexusParseAlarmTime(
+      normalized
+    );
+
+  if (time) {
+    const byTime =
+      alarms.find(
+        alarm =>
+          alarm.time === time
+      );
+
+    if (byTime) {
+      return byTime;
+    }
+  }
+
+  const words =
+    normalized
+      .split(/\s+/)
+      .filter(
+        word =>
+          word.length >= 3
+      );
+
+  let best:
+    | NexusAlarm
+    | null = null;
+
+  let score = 0;
+
+  for (
+    const alarm of alarms
+  ) {
+    const alarmWords =
+      alarm.title
+        .toLowerCase()
+        .split(/\s+/);
+
+    const matches =
+      words.filter(
+        word =>
+          alarmWords.some(
+            alarmWord =>
+              alarmWord.includes(
+                word
+              ) ||
+              word.includes(
+                alarmWord
+              )
+          )
+      ).length;
+
+    if (
+      matches > score
+    ) {
+      score = matches;
+      best = alarm;
+    }
+  }
+
+  return best;
+}
+
+function nexusApplyAlarmCommand(
+  alarms: NexusAlarm[],
+  text: string
+): {
+  alarms: NexusAlarm[];
+  handled: boolean;
+  message: string;
+} {
+  if (
+    !nexusIsAlarmCommand(text)
+  ) {
+    return {
+      alarms,
+      handled: false,
+      message: "",
+    };
+  }
+
+  if (
+    nexusIsDisableAlarmCommand(
+      text
+    )
+  ) {
+    const target =
+      nexusFindAlarm(
+        alarms,
+        text
+      );
+
+    if (!target) {
+      return {
+        alarms,
+        handled: true,
+        message:
+          "I couldn't find that alarm.",
+      };
+    }
+
+    const updated =
+      alarms.map(
+        alarm =>
+          alarm.id === target.id
+            ? nexusDisableAlarm(
+                alarm
+              )
+            : alarm
+      );
+
+    return {
+      alarms: updated,
+      handled: true,
+      message: `Alarm "${target.title}" disabled.`,
+    };
+  }
+
+  if (
+    nexusIsEnableAlarmCommand(
+      text
+    )
+  ) {
+    const target =
+      nexusFindAlarm(
+        alarms,
+        text
+      );
+
+    if (!target) {
+      return {
+        alarms,
+        handled: true,
+        message:
+          "I couldn't find that alarm.",
+      };
+    }
+
+    const updated =
+      alarms.map(
+        alarm =>
+          alarm.id === target.id
+            ? nexusEnableAlarm(
+                alarm
+              )
+            : alarm
+      );
+
+    return {
+      alarms: updated,
+      handled: true,
+      message: `Alarm "${target.title}" enabled.`,
+    };
+  }
+
+  const created =
+    nexusAlarmFromNaturalLanguage(
+      text
+    );
+
+  if (!created) {
+    return {
+      alarms,
+      handled: true,
+      message:
+        "Please specify the alarm time, for example: 08:00.",
+    };
+  }
+
+  return {
+    alarms: [
+      ...alarms,
+      created,
+    ],
+    handled: true,
+    message:
+      `Alarm "${created.title}" set for ${created.time}.`,
+  };
+}
+// ============================================================
+// NEXUS — PART 33
+// SMART DATE & TIME PARSER
+// ============================================================
+
+type NexusParsedDateTime = {
+  date: Date | null;
+  dateKey: string | null;
+  time: string | null;
+  confidence: number;
+  source: string;
+};
+
+function nexusStartOfDay(
+  date: Date
+): Date {
+  const result = new Date(date);
+  result.setHours(0, 0, 0, 0);
+  return result;
+}
+
+function nexusEndOfDay(
+  date: Date
+): Date {
+  const result = new Date(date);
+  result.setHours(23, 59, 59, 999);
+  return result;
+}
+
+function nexusAddDays(
+  date: Date,
+  days: number
+): Date {
+  const result = new Date(date);
+  result.setDate(
+    result.getDate() + days
+  );
+  return result;
+}
+
+function nexusGetDateKeySafe(
+  date: Date
+): string {
+  return [
+    date.getFullYear(),
+    String(
+      date.getMonth() + 1
+    ).padStart(2, "0"),
+    String(
+      date.getDate()
+    ).padStart(2, "0"),
+  ].join("-");
+}
+
+function nexusParseNumericDate(
+  text: string,
+  baseDate: Date
+): Date | null {
+  const match =
+    text.match(
+      /\b(\d{1,2})[./-](\d{1,2})(?:[./-](\d{2,4}))?\b/
+    );
+
+  if (!match) {
+    return null;
+  }
+
+  const day =
+    Number(match[1]);
+  const month =
+    Number(match[2]) - 1;
+
+  let year =
+    match[3]
+      ? Number(match[3])
+      : baseDate.getFullYear();
+
+  if (
+    year >= 0 &&
+    year < 100
+  ) {
+    year += 2000;
+  }
+
+  const result =
+    new Date(
+      year,
+      month,
+      day
+    );
+
+  if (
+    result.getFullYear() !== year ||
+    result.getMonth() !== month ||
+    result.getDate() !== day
+  ) {
+    return null;
+  }
+
+  return result;
+}
+
+function nexusParseMonthDate(
+  text: string,
+  baseDate: Date
+): Date | null {
+  const months: Record<
+    string,
+    number
+  > = {
+    january: 0,
+    february: 1,
+    march: 2,
+    april: 3,
+    may: 4,
+    june: 5,
+    july: 6,
+    august: 7,
+    september: 8,
+    october: 9,
+    november: 10,
+    december: 11,
+
+    enero: 0,
+    febrero: 1,
+    marzo: 2,
+    abril: 3,
+    mayo: 4,
+    junio: 5,
+    julio: 6,
+    agosto: 7,
+    septiembre: 8,
+    octubre: 9,
+    noviembre: 10,
+    diciembre: 11,
+
+    janvier: 0,
+    février: 1,
+    fevrier: 1,
+    mars: 2,
+    avril: 3,
+    mai: 4,
+    juin: 5,
+    juillet: 6,
+    août: 7,
+    aout: 7,
+    septembre: 8,
+    octobre: 9,
+    novembre: 10,
+    décembre: 11,
+    decembre: 11,
+  };
+
+  const pattern =
+    new RegExp(
+      `\\b(${Object.keys(months).join(
+        "|"
+      )})\\s+(\\d{1,2})(?:\\s*,?\\s*(\\d{4}))?\\b`,
+      "i"
+    );
+
+  const match =
+    text.match(pattern);
+
+  if (!match) {
+    return null;
+  }
+
+  const month =
+    months[
+      match[1].toLowerCase()
+    ];
+
+  const day =
+    Number(match[2]);
+
+  const year =
+    match[3]
+      ? Number(match[3])
+      : baseDate.getFullYear();
+
+  const result =
+    new Date(
+      year,
+      month,
+      day
+    );
+
+  if (
+    result.getMonth() !== month ||
+    result.getDate() !== day
+  ) {
+    return null;
+  }
+
+  return result;
+}
+
+function nexusParseRelativeDate(
+  text: string,
+  baseDate: Date
+): Date | null {
+  const normalized =
+    text.toLowerCase();
+
+  if (
+    /\b(today|hoy|aujourd'hui|今日|сегодня)\b/i.test(
+      normalized
+    )
+  ) {
+    return nexusStartOfDay(
+      baseDate
+    );
+  }
+
+  if (
+    /\b(tomorrow|mañana|demain|明日|завтра)\b/i.test(
+      normalized
+    )
+  ) {
+    return nexusStartOfDay(
+      nexusAddDays(
+        baseDate,
+        1
+      )
+    );
+  }
+
+  if (
+    /\b(yesterday|ayer|hier|昨日|вчера)\b/i.test(
+      normalized
+    )
+  ) {
+    return nexusStartOfDay(
+      nexusAddDays(
+        baseDate,
+        -1
+      )
+    );
+  }
+
+  const inDays =
+    normalized.match(
+      /\b(?:in|через|en|dans)\s+(\d+)\s+(?:days?|días?|jours?|дн(?:я|ей)?|日)\b/i
+    );
+
+  if (inDays) {
+    return nexusStartOfDay(
+      nexusAddDays(
+        baseDate,
+        Number(inDays[1])
+      )
+    );
+  }
+
+  return null;
+}
+
+function nexusParseWeekdayDate(
+  text: string,
+  baseDate: Date
+): Date | null {
+  const normalized =
+    text.toLowerCase();
+
+  const dayNames: Record<
+    string,
+    number
+  > = {
+    sunday: 0,
+    monday: 1,
+    tuesday: 2,
+    wednesday: 3,
+    thursday: 4,
+    friday: 5,
+    saturday: 6,
+
+    domingo: 0,
+    lunes: 1,
+    martes: 2,
+    miércoles: 3,
+    miercoles: 3,
+    jueves: 4,
+    viernes: 5,
+    sábado: 6,
+    sabado: 6,
+
+    dimanche: 0,
+    lundi: 1,
+    mardi: 2,
+    mercredi: 3,
+    jeudi: 4,
+    vendredi: 5,
+    samedi: 6,
+  };
+
+  for (
+    const [name, targetDay] of Object.entries(
+      dayNames
+    )
+  ) {
+    if (
+      !normalized.includes(name)
+    ) {
+      continue;
+    }
+
+    const currentDay =
+      baseDate.getDay();
+
+    let difference =
+      targetDay - currentDay;
+
+    if (
+      difference <= 0
+    ) {
+      difference += 7;
+    }
+
+    const result =
+      nexusAddDays(
+        baseDate,
+        difference
+      );
+
+    return nexusStartOfDay(
+      result
+    );
+  }
+
+  return null;
+}
+
+function nexusParseTimeFromText(
+  text: string
+): string | null {
+  const direct =
+    text.match(
+      /\b([01]?\d|2[0-3])[:.]([0-5]\d)\b/
+    );
+
+  if (direct) {
+    return `${String(
+      Number(direct[1])
+    ).padStart(
+      2,
+      "0"
+    )}:${String(
+      Number(direct[2])
+    ).padStart(
+      2,
+      "0"
+    )}`;
+  }
+
+  const amPm =
+    text.match(
+      /\b(1[0-2]|0?[1-9])\s*(am|pm|a\.m\.|p\.m\.)\b/i
+    );
+
+  if (amPm) {
+    let hours =
+      Number(amPm[1]);
+
+    const period =
+      amPm[2].toLowerCase();
+
+    if (
+      period.startsWith("p") &&
+      hours < 12
+    ) {
+      hours += 12;
+    }
+
+    if (
+      period.startsWith("a") &&
+      hours === 12
+    ) {
+      hours = 0;
+    }
+
+    return `${String(
+      hours
+    ).padStart(
+      2,
+      "0"
+    )}:00`;
+  }
+
+  return null;
+}
+
+function nexusApplyTime(
+  date: Date,
+  time: string | null
+): Date {
+  const result =
+    new Date(date);
+
+  if (!time) {
+    return result;
+  }
+
+  const parts =
+    time.split(":");
+
+  const hours =
+    Number(parts[0]);
+
+  const minutes =
+    Number(parts[1]);
+
+  result.setHours(
+    hours,
+    minutes,
+    0,
+    0
+  );
+
+  return result;
+}
+
+function nexusParseNaturalDateTime(
+  text: string,
+  baseDate: Date = new Date()
+): NexusParsedDateTime {
+  const time =
+    nexusParseTimeFromText(
+      text
+    );
+
+  let date:
+    | Date
+    | null = null;
+
+  let source =
+    "unknown";
+
+  const relative =
+    nexusParseRelativeDate(
+      text,
+      baseDate
+    );
+
+  if (relative) {
+    date = relative;
+    source = "relative";
+  }
+
+  if (!date) {
+    const weekday =
+      nexusParseWeekdayDate(
+        text,
+        baseDate
+      );
+
+    if (weekday) {
+      date = weekday;
+      source = "weekday";
+    }
+  }
+
+  if (!date) {
+    const numeric =
+      nexusParseNumericDate(
+        text,
+        baseDate
+      );
+
+    if (numeric) {
+      date = numeric;
+      source = "numeric";
+    }
+  }
+
+  if (!date) {
+    const monthDate =
+      nexusParseMonthDate(
+        text,
+        baseDate
+      );
+
+    if (monthDate) {
+      date = monthDate;
+      source = "month";
+    }
+  }
+
+  if (
+    !date &&
+    time
+  ) {
+    date =
+      nexusStartOfDay(
+        baseDate
+      );
+    source = "time-only";
+  }
+
+  if (date) {
+    date =
+      nexusApplyTime(
+        date,
+        time
+      );
+  }
+
+  let confidence = 0;
+
+  if (date) {
+    confidence += 0.5;
+  }
+
+  if (time) {
+    confidence += 0.4;
+  }
+
+  if (
+    source !== "unknown"
+  ) {
+    confidence += 0.1;
+  }
+
+  return {
+    date,
+    dateKey: date
+      ? nexusGetDateKeySafe(date)
+      : null,
+    time,
+    confidence: Math.min(
+      confidence,
+      1
+    ),
+    source,
+  };
+}
+
+function nexusFormatParsedDateTime(
+  parsed: NexusParsedDateTime,
+  language?: string
+): string {
+  if (!parsed.date) {
+    return "";
+  }
+
+  const dateText =
+    nexusGetLocalizedDate(
+      parsed.date,
+      language
+    );
+
+  if (!parsed.time) {
+    return dateText;
+  }
+
+  return `${dateText}, ${parsed.time}`;
+}
+
+function nexusGetNextOccurrence(
+  time: string,
+  from: Date = new Date()
+): Date | null {
+  if (
+    !nexusIsValidAlarmTime(time)
+  ) {
+    return null;
+  }
+
+  const [hours, minutes] =
+    time.split(":").map(Number);
+
+  const result =
+    new Date(from);
+
+  result.setHours(
+    hours,
+    minutes,
+    0,
+    0
+  );
+
+  if (
+    result.getTime() <=
+    from.getTime()
+  ) {
+    result.setDate(
+      result.getDate() + 1
+    );
+  }
+
+  return result;
+}
+
+function nexusParseDuration(
+  text: string
+): number | null {
+  const normalized =
+    text.toLowerCase();
+
+  const hourMatch =
+    normalized.match(
+      /(\d+(?:[.,]\d+)?)\s*(?:hours?|hrs?|h|час(?:а|ов)?|час|horas?|heure?s?|時間)/i
+    );
+
+  const minuteMatch =
+    normalized.match(
+      /(\d+)\s*(?:minutes?|mins?|m|min|мин(?:ут(?:а|ы)?)?|minutos?|minutes?|分)/i
+    );
+
+  const secondMatch =
+    normalized.match(
+      /(\d+)\s*(?:seconds?|secs?|s|сек(?:унд(?:а|ы)?)?|segundos?|secondes?|秒)/i
+    );
+
+  let total = 0;
+
+  if (hourMatch) {
+    total +=
+      Number(
+        hourMatch[1].replace(
+          ",",
+          "."
+        )
+      ) *
+      60 *
+      60;
+  }
+
+  if (minuteMatch) {
+    total +=
+      Number(
+        minuteMatch[1]
+      ) *
+      60;
+  }
+
+  if (secondMatch) {
+    total +=
+      Number(
+        secondMatch[1]
+      );
+  }
+
+  return total > 0
+    ? Math.round(total)
+    : null;
+}
+
+function nexusDescribeDuration(
+  seconds: number,
+  language?: string
+): string {
+  const safe =
+    Math.max(
+      0,
+      Math.floor(seconds)
+    );
+
+  const hours =
+    Math.floor(
+      safe / 3600
+    );
+
+  const minutes =
+    Math.floor(
+      (safe % 3600) / 60
+    );
+
+  const secs =
+    safe % 60;
+
+  const code =
+    nexusNormalizeLanguage(
+      language
+    );
+
+  if (code === "ja") {
+    const parts: string[] = [];
+
+    if (hours) {
+      parts.push(
+        `${hours}時間`
+      );
+    }
+
+    if (minutes) {
+      parts.push(
+        `${minutes}分`
+      );
+    }
+
+    if (secs) {
+      parts.push(
+        `${secs}秒`
+      );
+    }
+
+    return (
+      parts.join(" ") ||
+      "0秒"
+    );
+  }
+
+  if (code === "fr") {
+    const parts: string[] = [];
+
+    if (hours) {
+      parts.push(
+        `${hours} h`
+      );
+    }
+
+    if (minutes) {
+      parts.push(
+        `${minutes} min`
+      );
+    }
+
+    if (secs) {
+      parts.push(
+        `${secs} s`
+      );
+    }
+
+    return (
+      parts.join(" ") ||
+      "0 s"
+    );
+  }
+
+  if (code === "es") {
+    const parts: string[] = [];
+
+    if (hours) {
+      parts.push(
+        `${hours} h`
+      );
+    }
+
+    if (minutes) {
+      parts.push(
+        `${minutes} min`
+      );
+    }
+
+    if (secs) {
+      parts.push(
+        `${secs} s`
+      );
+    }
+
+    return (
+      parts.join(" ") ||
+      "0 s"
+    );
+  }
+
+  const parts: string[] = [];
+
+  if (hours) {
+    parts.push(
+      `${hours}h`
+    );
+  }
+
+  if (minutes) {
+    parts.push(
+      `${minutes}m`
+    );
+  }
+
+  if (secs) {
+    parts.push(
+      `${secs}s`
+    );
+  }
+
+  return (
+    parts.join(" ") ||
+    "0s"
+  );
+}
+// ============================================================
+// NEXUS — PART 34
+// SMART REMINDER & PROACTIVE PLANNING ENGINE
+// ============================================================
+
+type NexusReminderKind =
+  | "task"
+  | "event"
+  | "note"
+  | "alarm"
+  | "timer"
+  | "custom";
+
+type NexusReminder = {
+  id: string;
+  title: string;
+  message: string;
+  kind: NexusReminderKind;
+  triggerAt: number;
+  enabled: boolean;
+  repeat?: NexusAlarmRepeat;
+  createdAt: number;
+  triggeredAt?: number;
+};
+
+type NexusProactiveSuggestion = {
+  id: string;
+  type:
+    | "task"
+    | "calendar"
+    | "reminder"
+    | "note"
+    | "alarm"
+    | "system";
+  title: string;
+  message: string;
+  priority: number;
+  createdAt: number;
+  expiresAt?: number;
+  action?: string;
+};
+
+const nexusReminderStore: NexusReminder[] =
+  [];
+
+const nexusSuggestionStore: NexusProactiveSuggestion[] =
+  [];
+
+function nexusCreateReminder(
+  title: string,
+  message: string,
+  triggerAt: number,
+  kind: NexusReminderKind = "custom",
+  repeat?: NexusAlarmRepeat
+): NexusReminder {
+  return {
+    id:
+      typeof createId === "function"
+        ? createId()
+        : `reminder_${Date.now()}_${Math.random()
+            .toString(36)
+            .slice(2, 8)}`,
+    title:
+      title.trim() ||
+      "NEXUS Reminder",
+    message:
+      message.trim() || title,
+    kind,
+    triggerAt,
+    enabled: true,
+    repeat,
+    createdAt: Date.now(),
+  };
+}
+
+function nexusAddReminder(
+  reminder: NexusReminder
+): NexusReminder {
+  nexusReminderStore.push(
+    reminder
+  );
+
+  return reminder;
+}
+
+function nexusRemoveReminder(
+  id: string
+): boolean {
+  const index =
+    nexusReminderStore.findIndex(
+      reminder =>
+        reminder.id === id
+    );
+
+  if (index === -1) {
+    return false;
+  }
+
+  nexusReminderStore.splice(
+    index,
+    1
+  );
+
+  return true;
+}
+
+function nexusToggleReminder(
+  id: string
+): boolean {
+  const reminder =
+    nexusReminderStore.find(
+      item =>
+        item.id === id
+    );
+
+  if (!reminder) {
+    return false;
+  }
+
+  reminder.enabled =
+    !reminder.enabled;
+
+  return reminder.enabled;
+}
+
+function nexusGetReminders(
+  includeDisabled = true
+): NexusReminder[] {
+  return nexusReminderStore
+    .filter(
+      reminder =>
+        includeDisabled ||
+        reminder.enabled
+    )
+    .sort(
+      (a, b) =>
+        a.triggerAt -
+        b.triggerAt
+    );
+}
+
+function nexusGetUpcomingReminders(
+  from: number = Date.now(),
+  limit = 10
+): NexusReminder[] {
+  return nexusReminderStore
+    .filter(
+      reminder =>
+        reminder.enabled &&
+        reminder.triggerAt >= from
+    )
+    .sort(
+      (a, b) =>
+        a.triggerAt -
+        b.triggerAt
+    )
+    .slice(
+      0,
+      Math.max(
+        1,
+        limit
+      )
+    );
+}
+
+function nexusTriggerReminder(
+  reminder: NexusReminder
+): NexusNotificationItem {
+  reminder.triggeredAt =
+    Date.now();
+
+  const notification =
+    nexusAddNotification(
+      reminder.title,
+      reminder.message,
+      reminder.kind === "alarm"
+        ? "alarm"
+        : reminder.kind === "timer"
+        ? "timer"
+        : reminder.kind === "task"
+        ? "task"
+        : reminder.kind === "event"
+        ? "calendar"
+        : "system",
+      "normal"
+    );
+
+  if (
+    reminder.repeat &&
+    reminder.repeat !== "once"
+  ) {
+    const next =
+      nexusGetNextReminderOccurrence(
+        reminder
+      );
+
+    if (next) {
+      reminder.triggerAt =
+        next;
+      reminder.triggeredAt =
+        undefined;
+    }
+  } else {
+    reminder.enabled =
+      false;
+  }
+
+  return notification;
+}
+
+function nexusGetNextReminderOccurrence(
+  reminder: NexusReminder
+): number | null {
+  const current =
+    new Date(
+      reminder.triggerAt
+    );
+
+  if (
+    !reminder.repeat ||
+    reminder.repeat === "once"
+  ) {
+    return null;
+  }
+
+  if (
+    reminder.repeat === "daily"
+  ) {
+    current.setDate(
+      current.getDate() + 1
+    );
+
+    return current.getTime();
+  }
+
+  if (
+    reminder.repeat === "weekly"
+  ) {
+    current.setDate(
+      current.getDate() + 7
+    );
+
+    return current.getTime();
+  }
+
+  if (
+    reminder.repeat === "weekdays"
+  ) {
+    do {
+      current.setDate(
+        current.getDate() + 1
+      );
+    } while (
+      current.getDay() === 0 ||
+      current.getDay() === 6
+    );
+
+    return current.getTime();
+  }
+
+  if (
+    reminder.repeat === "weekends"
+  ) {
+    do {
+      current.setDate(
+        current.getDate() + 1
+      );
+    } while (
+      current.getDay() !== 0 &&
+      current.getDay() !== 6
+    );
+
+    return current.getTime();
+  }
+
+  return null;
+}
+
+function nexusProcessReminders(
+  now: number = Date.now()
+): NexusNotificationItem[] {
+  const triggered: NexusNotificationItem[] =
+    [];
+
+  for (
+    const reminder of nexusReminderStore
+  ) {
+    if (
+      !reminder.enabled ||
+      reminder.triggerAt > now
+    ) {
+      continue;
+    }
+
+    const notification =
+      nexusTriggerReminder(
+        reminder
+      );
+
+    triggered.push(
+      notification
+    );
+  }
+
+  return triggered;
+}
+
+function nexusCreateSuggestion(
+  type: NexusProactiveSuggestion["type"],
+  title: string,
+  message: string,
+  priority = 50,
+  expiresAt?: number,
+  action?: string
+): NexusProactiveSuggestion {
+  return {
+    id:
+      typeof createId === "function"
+        ? createId()
+        : `suggestion_${Date.now()}_${Math.random()
+            .toString(36)
+            .slice(2, 8)}`,
+    type,
+    title,
+    message,
+    priority,
+    createdAt: Date.now(),
+    expiresAt,
+    action,
+  };
+}
+
+function nexusAddSuggestion(
+  suggestion: NexusProactiveSuggestion
+): NexusProactiveSuggestion {
+  nexusSuggestionStore.push(
+    suggestion
+  );
+
+  return suggestion;
+}
+
+function nexusGetSuggestions(
+  now: number = Date.now()
+): NexusProactiveSuggestion[] {
+  return nexusSuggestionStore
+    .filter(
+      suggestion =>
+        !suggestion.expiresAt ||
+        suggestion.expiresAt > now
+    )
+    .sort(
+      (a, b) =>
+        b.priority -
+        a.priority
+    );
+}
+
+function nexusRemoveSuggestion(
+  id: string
+): boolean {
+  const index =
+    nexusSuggestionStore.findIndex(
+      suggestion =>
+        suggestion.id === id
+    );
+
+  if (index === -1) {
+    return false;
+  }
+
+  nexusSuggestionStore.splice(
+    index,
+    1
+  );
+
+  return true;
+}
+
+function nexusClearSuggestions(): void {
+  nexusSuggestionStore.length = 0;
+}
+
+function nexusSuggestUpcomingTask(
+  title: string,
+  dueAt: number
+): NexusProactiveSuggestion {
+  return nexusAddSuggestion(
+    nexusCreateSuggestion(
+      "task",
+      "Upcoming task",
+      `${title} is coming up.`,
+      70,
+      dueAt
+    )
+  );
+}
+
+function nexusSuggestUpcomingEvent(
+  title: string,
+  eventAt: number
+): NexusProactiveSuggestion {
+  return nexusAddSuggestion(
+    nexusCreateSuggestion(
+      "calendar",
+      "Upcoming event",
+      `${title} is scheduled soon.`,
+      80,
+      eventAt
+    )
+  );
+}
+
+function nexusSuggestReminder(
+  title: string,
+  message: string,
+  triggerAt: number
+): NexusProactiveSuggestion {
+  return nexusAddSuggestion(
+    nexusCreateSuggestion(
+      "reminder",
+      title,
+      message,
+      60,
+      triggerAt
+    )
+  );
+}
+
+function nexusBuildDailySuggestions(
+  now: Date = new Date()
+): NexusProactiveSuggestion[] {
+  const suggestions: NexusProactiveSuggestion[] =
+    [];
+
+  const start =
+    nexusStartOfDay(now).getTime();
+
+  const end =
+    nexusEndOfDay(now).getTime();
+
+  for (
+    const reminder of nexusReminderStore
+  ) {
+    if (
+      reminder.enabled &&
+      reminder.triggerAt >= start &&
+      reminder.triggerAt <= end
+    ) {
+      suggestions.push(
+        nexusCreateSuggestion(
+          "reminder",
+          reminder.title,
+          reminder.message,
+          65,
+          reminder.triggerAt
+        )
+      );
+    }
+  }
+
+  return suggestions.sort(
+    (a, b) =>
+      b.priority -
+      a.priority
+  );
+}
+
+function nexusFormatReminder(
+  reminder: NexusReminder,
+  language?: string
+): string {
+  const date =
+    new Date(
+      reminder.triggerAt
+    );
+
+  const dateText =
+    nexusGetLocalizedDate(
+      date,
+      language
+    );
+
+  const timeText =
+    nexusGetLocalizedTime(
+      date,
+      language
+    );
+
+  return `${reminder.title} — ${dateText}, ${timeText}`;
+}
+
+function nexusReminderSummary(
+  language?: string
+): string {
+  const reminders =
+    nexusGetUpcomingReminders(
+      Date.now(),
+      5
+    );
+
+  if (!reminders.length) {
+    return nexusTranslate(
+      "noResults",
+      language,
+      "No upcoming reminders"
+    );
+  }
+
+  return reminders
+    .map(
+      reminder =>
+        nexusFormatReminder(
+          reminder,
+          language
+        )
+    )
+    .join("\n");
+}
+// ============================================================
+// NEXUS — PART 35
+// SMART TASK & CALENDAR REMINDER INTEGRATION ENGINE
+// ============================================================
+
+type NexusScheduleItem = {
+  id: string;
+  title: string;
+  description?: string;
+  date: string;
+  time?: string;
+  source:
+    | "task"
+    | "calendar"
+    | "note"
+    | "custom";
+  completed?: boolean;
+};
+
+function nexusBuildTaskScheduleItem(
+  task: NexusTask
+): NexusScheduleItem {
+  return {
+    id: task.id,
+    title: task.title,
+    description:
+      task.description,
+    date: task.dueDate,
+    time:
+      task.dueTime || undefined,
+    source: "task",
+    completed:
+      task.completed,
+  };
+}
+
+function nexusBuildCalendarScheduleItem(
+  event: NexusCalendarEvent
+): NexusScheduleItem {
+  return {
+    id: event.id,
+    title: event.title,
+    description:
+      event.description,
+    date: event.date,
+    time:
+      event.time || undefined,
+    source: "calendar",
+  };
+}
+
+function nexusScheduleItemTimestamp(
+  item: NexusScheduleItem
+): number | null {
+  if (!item.date) {
+    return null;
+  }
+
+  const date = new Date(
+    item.date
+  );
+
+  if (
+    Number.isNaN(
+      date.getTime()
+    )
+  ) {
+    return null;
+  }
+
+  if (item.time) {
+    const match =
+      item.time.match(
+        /^(\d{1,2}):(\d{2})$/
+      );
+
+    if (match) {
+      date.setHours(
+        Number(match[1]),
+        Number(match[2]),
+        0,
+        0
+      );
+    }
+  }
+
+  return date.getTime();
+}
+
+function nexusCreateTaskReminder(
+  task: NexusTask,
+  minutesBefore = 15
+): NexusReminder | null {
+  if (
+    !task.dueDate
+  ) {
+    return null;
+  }
+
+  const scheduleItem =
+    nexusBuildTaskScheduleItem(
+      task
+    );
+
+  const timestamp =
+    nexusScheduleItemTimestamp(
+      scheduleItem
+    );
+
+  if (timestamp === null) {
+    return null;
+  }
+
+  const triggerAt =
+    timestamp -
+    minutesBefore * 60 * 1000;
+
+  const reminder =
+    nexusCreateReminder(
+      `Task: ${task.title}`,
+      minutesBefore > 0
+        ? `${task.title} starts in ${minutesBefore} minutes.`
+        : task.title,
+      triggerAt,
+      "task"
+    );
+
+  return nexusAddReminder(
+    reminder
+  );
+}
+
+function nexusCreateCalendarReminder(
+  event: NexusCalendarEvent,
+  minutesBefore = 15
+): NexusReminder | null {
+  if (!event.date) {
+    return null;
+  }
+
+  const scheduleItem =
+    nexusBuildCalendarScheduleItem(
+      event
+    );
+
+  const timestamp =
+    nexusScheduleItemTimestamp(
+      scheduleItem
+    );
+
+  if (timestamp === null) {
+    return null;
+  }
+
+  const triggerAt =
+    timestamp -
+    minutesBefore * 60 * 1000;
+
+  const reminder =
+    nexusCreateReminder(
+      `Event: ${event.title}`,
+      minutesBefore > 0
+        ? `${event.title} starts in ${minutesBefore} minutes.`
+        : event.title,
+      triggerAt,
+      "event"
+    );
+
+  return nexusAddReminder(
+    reminder
+  );
+}
+
+function nexusCreateCustomScheduleReminder(
+  title: string,
+  dateTime: Date,
+  message?: string
+): NexusReminder {
+  return nexusAddReminder(
+    nexusCreateReminder(
+      title,
+      message || title,
+      dateTime.getTime(),
+      "custom"
+    )
+  );
+}
+
+function nexusRemoveRemindersForSource(
+  sourceId: string
+): number {
+  let removed = 0;
+
+  for (
+    let index =
+      nexusReminderStore.length - 1;
+    index >= 0;
+    index--
+  ) {
+    const reminder =
+      nexusReminderStore[index];
+
+    const matches =
+      reminder.message.includes(
+        sourceId
+      ) ||
+      reminder.title.includes(
+        sourceId
+      );
+
+    if (matches) {
+      nexusReminderStore.splice(
+        index,
+        1
+      );
+
+      removed++;
+    }
+  }
+
+  return removed;
+}
+
+function nexusGetScheduleForDate(
+  tasks: NexusTask[],
+  events: NexusCalendarEvent[],
+  dateKey: string
+): NexusScheduleItem[] {
+  const result: NexusScheduleItem[] =
+    [];
+
+  for (
+    const task of tasks
+  ) {
+    if (
+      task.dueDate === dateKey &&
+      !task.completed
+    ) {
+      result.push(
+        nexusBuildTaskScheduleItem(
+          task
+        )
+      );
+    }
+  }
+
+  for (
+    const event of events
+  ) {
+    if (
+      event.date === dateKey
+    ) {
+      result.push(
+        nexusBuildCalendarScheduleItem(
+          event
+        )
+      );
+    }
+  }
+
+  return result.sort(
+    (a, b) => {
+      if (
+        !a.time &&
+        !b.time
+      ) {
+        return 0;
+      }
+
+      if (!a.time) {
+        return 1;
+      }
+
+      if (!b.time) {
+        return -1;
+      }
+
+      return a.time.localeCompare(
+        b.time
+      );
+    }
+  );
+}
+
+function nexusGetTodaySchedule(
+  tasks: NexusTask[],
+  events: NexusCalendarEvent[],
+  now: Date = new Date()
+): NexusScheduleItem[] {
+  return nexusGetScheduleForDate(
+    tasks,
+    events,
+    nexusGetDateKeySafe(
+      now
+    )
+  );
+}
+
+function nexusGetTomorrowSchedule(
+  tasks: NexusTask[],
+  events: NexusCalendarEvent[],
+  now: Date = new Date()
+): NexusScheduleItem[] {
+  const tomorrow =
+    nexusAddDays(
+      now,
+      1
+    );
+
+  return nexusGetScheduleForDate(
+    tasks,
+    events,
+    nexusGetDateKeySafe(
+      tomorrow
+    )
+  );
+}
+
+function nexusGetUpcomingSchedule(
+  tasks: NexusTask[],
+  events: NexusCalendarEvent[],
+  from: Date = new Date(),
+  limit = 20
+): NexusScheduleItem[] {
+  const combined: Array<{
+    item: NexusScheduleItem;
+    timestamp: number;
+  }> = [];
+
+  for (
+    const task of tasks
+  ) {
+    if (
+      task.completed ||
+      !task.dueDate
+    ) {
+      continue;
+    }
+
+    const item =
+      nexusBuildTaskScheduleItem(
+        task
+      );
+
+    const timestamp =
+      nexusScheduleItemTimestamp(
+        item
+      );
+
+    if (
+      timestamp !== null &&
+      timestamp >= from.getTime()
+    ) {
+      combined.push({
+        item,
+        timestamp,
+      });
+    }
+  }
+
+  for (
+    const event of events
+  ) {
+    if (!event.date) {
+      continue;
+    }
+
+    const item =
+      nexusBuildCalendarScheduleItem(
+        event
+      );
+
+    const timestamp =
+      nexusScheduleItemTimestamp(
+        item
+      );
+
+    if (
+      timestamp !== null &&
+      timestamp >= from.getTime()
+    ) {
+      combined.push({
+        item,
+        timestamp,
+      });
+    }
+  }
+
+  return combined
+    .sort(
+      (a, b) =>
+        a.timestamp -
+        b.timestamp
+    )
+    .slice(
+      0,
+      Math.max(
+        1,
+        limit
+      )
+    )
+    .map(
+      entry =>
+        entry.item
+    );
+}
+
+function nexusScheduleAutomaticTaskReminder(
+  task: NexusTask
+): NexusReminder | null {
+  return nexusCreateTaskReminder(
+    task,
+    15
+  );
+}
+
+function nexusScheduleAutomaticEventReminder(
+  event: NexusCalendarEvent
+): NexusReminder | null {
+  return nexusCreateCalendarReminder(
+    event,
+    15
+  );
+}
+
+function nexusBuildScheduleSummary(
+  tasks: NexusTask[],
+  events: NexusCalendarEvent[],
+  language?: string
+): string {
+  const items =
+    nexusGetUpcomingSchedule(
+      tasks,
+      events,
+      new Date(),
+      10
+    );
+
+  if (!items.length) {
+    return nexusTranslate(
+      "noResults",
+      language,
+      "No upcoming items."
+    );
+  }
+
+  return items
+    .map(
+      item => {
+        const date =
+          new Date(
+            `${item.date}T${
+              item.time ||
+              "00:00"
+            }`
+          );
+
+        const dateText =
+          nexusGetLocalizedDate(
+            date,
+            language
+          );
+
+        const timeText =
+          item.time
+            ? ` ${item.time}`
+            : "";
+
+        return `• ${item.title} — ${dateText}${timeText}`;
+      }
+    )
+    .join("\n");
+}
+
+function nexusFindNextScheduleItem(
+  tasks: NexusTask[],
+  events: NexusCalendarEvent[]
+): NexusScheduleItem | null {
+  const upcoming =
+    nexusGetUpcomingSchedule(
+      tasks,
+      events,
+      new Date(),
+      1
+    );
+
+  return (
+    upcoming[0] || null
+  );
+}
+
+function nexusGetScheduleCountdown(
+  item: NexusScheduleItem,
+  now: Date = new Date()
+): number | null {
+  const timestamp =
+    nexusScheduleItemTimestamp(
+      item
+    );
+
+  if (timestamp === null) {
+    return null;
+  }
+
+  return Math.max(
+    0,
+    timestamp -
+      now.getTime()
+  );
+}
+
+function nexusFormatScheduleCountdown(
+  milliseconds: number,
+  language?: string
+): string {
+  const seconds =
+    Math.floor(
+      milliseconds / 1000
+    );
+
+  return nexusDescribeDuration(
+    seconds,
+    language
+  );
+}
+// ==============================
+// NEXUS — PART 36
+// SMART COMMAND ROUTER & ACTION PLANNER
+// ==============================
+
+type NexusActionType =
+  | "memory_add"
+  | "memory_remove"
+  | "note_create"
+  | "note_update"
+  | "task_create"
+  | "task_complete"
+  | "task_delete"
+  | "calendar_create"
+  | "calendar_delete"
+  | "alarm_create"
+  | "alarm_delete"
+  | "timer_create"
+  | "timer_stop"
+  | "file_create"
+  | "file_delete"
+  | "search"
+  | "settings_update"
+  | "chat_action"
+  | "unknown";
+
+type NexusActionPriority = "low" | "normal" | "high";
+
+type NexusAction = {
+  id: string;
+  type: NexusActionType;
+  priority: NexusActionPriority;
+  title: string;
+  description?: string;
+  payload: Record<string, unknown>;
+  requiresConfirmation: boolean;
+  createdAt: number;
+};
+
+type NexusActionPlan = {
+  originalText: string;
+  actions: NexusAction[];
+  confidence: number;
+  requiresConfirmation: boolean;
+  explanation?: string;
+};
+
+const nexusActionId = () =>
+  `action_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+
+const nexusNormalizeCommand = (value: string) =>
+  value
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+
+const nexusHasAnyPhrase = (
+  text: string,
+  phrases: string[]
+): boolean => {
+  return phrases.some((phrase) => text.includes(phrase));
+};
+
+const nexusExtractAfterPhrase = (
+  text: string,
+  phrases: string[]
+): string => {
+  const normalized = nexusNormalizeCommand(text);
+
+  for (const phrase of phrases) {
+    const index = normalized.indexOf(phrase);
+
+    if (index !== -1) {
+      return normalized
+        .slice(index + phrase.length)
+        .replace(/^[\s:,-]+/, "")
+        .trim();
+    }
+  }
+
+  return "";
+};
+
+const nexusDetectPriority = (
+  text: string
+): NexusActionPriority => {
+  const normalized = nexusNormalizeCommand(text);
+
+  if (
+    nexusHasAnyPhrase(normalized, [
+      "срочно",
+      "очень важно",
+      "как можно скорее",
+      "urgent",
+      "asap",
+      "immediately",
+    ])
+  ) {
+    return "high";
+  }
+
+  if (
+    nexusHasAnyPhrase(normalized, [
+      "не забудь",
+      "важно",
+      "важная задача",
+      "important",
+      "remind me",
+    ])
+  ) {
+    return "normal";
+  }
+
+  return "low";
+};
+
+const nexusCreateAction = (
+  type: NexusActionType,
+  title: string,
+  payload: Record<string, unknown>,
+  options?: {
+    description?: string;
+    priority?: NexusActionPriority;
+    requiresConfirmation?: boolean;
+  }
+): NexusAction => ({
+  id: nexusActionId(),
+  type,
+  title,
+  description: options?.description,
+  payload,
+  priority: options?.priority ?? "normal",
+  requiresConfirmation:
+    options?.requiresConfirmation ?? false,
+  createdAt: Date.now(),
+});
+
+const nexusPlanMemoryAction = (
+  text: string
+): NexusAction | null => {
+  const normalized = nexusNormalizeCommand(text);
+
+  const addMemory =
+    nexusHasAnyPhrase(normalized, [
+      "запомни",
+      "запиши в память",
+      "remember",
+      "remember that",
+    ]);
+
+  if (addMemory) {
+    const content = nexusExtractAfterPhrase(
+      normalized,
+      [
+        "запиши в память",
+        "запомни",
+        "remember that",
+        "remember",
+      ]
+    );
+
+    if (!content) {
+      return null;
+    }
+
+    return nexusCreateAction(
+      "memory_add",
+      "Добавить информацию в память",
+      {
+        content,
+        source: "natural_language",
+      },
+      {
+        priority: "normal",
+        requiresConfirmation: false,
+      }
+    );
+  }
+
+  const removeMemory =
+    nexusHasAnyPhrase(normalized, [
+      "забудь",
+      "удали из памяти",
+      "forget",
+      "forget that",
+    ]);
+
+  if (removeMemory) {
+    const content = nexusExtractAfterPhrase(
+      normalized,
+      [
+        "удали из памяти",
+        "забудь",
+        "forget that",
+        "forget",
+      ]
+    );
+
+    if (!content) {
+      return null;
+    }
+
+    return nexusCreateAction(
+      "memory_remove",
+      "Удалить информацию из памяти",
+      {
+        query: content,
+      },
+      {
+        priority: "normal",
+        requiresConfirmation: true,
+      }
+    );
+  }
+
+  return null;
+};
+
+const nexusPlanNoteAction = (
+  text: string
+): NexusAction | null => {
+  const normalized = nexusNormalizeCommand(text);
+
+  if (
+    !nexusHasAnyPhrase(normalized, [
+      "создай заметку",
+      "создай новую заметку",
+      "добавь заметку",
+      "новая заметка",
+      "create note",
+      "new note",
+      "add a note",
+    ])
+  ) {
+    return null;
+  }
+
+  const content = nexusExtractAfterPhrase(
+    normalized,
+    [
+      "создай новую заметку",
+      "создай заметку",
+      "добавь заметку",
+      "новая заметка",
+      "create note",
+      "new note",
+      "add a note",
+    ]
+  );
+
+  return nexusCreateAction(
+    "note_create",
+    content || "Новая заметка",
+    {
+      title: content || "Новая заметка",
+      content: content || "",
+    },
+    {
+      priority: "normal",
+      requiresConfirmation: false,
+    }
+  );
+};
+
+const nexusPlanTaskAction = (
+  text: string
+): NexusAction | null => {
+  const normalized = nexusNormalizeCommand(text);
+
+  if (
+    nexusHasAnyPhrase(normalized, [
+      "поставь задачу",
+      "создай задачу",
+      "добавь задачу",
+      "новая задача",
+      "сделай задачей",
+      "create task",
+      "add task",
+      "new task",
+      "make it a task",
+    ])
+  ) {
+    const title = nexusExtractAfterPhrase(
+      normalized,
+      [
+        "поставь задачу",
+        "создай задачу",
+        "добавь задачу",
+        "новая задача",
+        "сделай задачей",
+        "create task",
+        "add task",
+        "new task",
+        "make it a task",
+      ]
+    );
+
+    return nexusCreateAction(
+      "task_create",
+      title || "Новая задача",
+      {
+        title: title || "Новая задача",
+        description: "",
+      },
+      {
+        priority: nexusDetectPriority(normalized),
+        requiresConfirmation: false,
+      }
+    );
+  }
+
+  if (
+    nexusHasAnyPhrase(normalized, [
+      "выполни задачу",
+      "заверши задачу",
+      "отметь задачу выполненной",
+      "complete task",
+      "finish task",
+      "mark task complete",
+    ])
+  ) {
+    const query = nexusExtractAfterPhrase(
+      normalized,
+      [
+        "выполни задачу",
+        "заверши задачу",
+        "отметь задачу выполненной",
+        "complete task",
+        "finish task",
+        "mark task complete",
+      ]
+    );
+
+    return nexusCreateAction(
+      "task_complete",
+      "Завершить задачу",
+      {
+        query,
+      },
+      {
+        requiresConfirmation: false,
+      }
+    );
+  }
+
+  if (
+    nexusHasAnyPhrase(normalized, [
+      "удали задачу",
+      "delete task",
+      "remove task",
+    ])
+  ) {
+    const query = nexusExtractAfterPhrase(
+      normalized,
+      [
+        "удали задачу",
+        "delete task",
+        "remove task",
+      ]
+    );
+
+    return nexusCreateAction(
+      "task_delete",
+      "Удалить задачу",
+      {
+        query,
+      },
+      {
+        requiresConfirmation: true,
+      }
+    );
+  }
+
+  return null;
+};
+
+const nexusPlanCalendarAction = (
+  text: string
+): NexusAction | null => {
+  const normalized = nexusNormalizeCommand(text);
+
+  if (
+    !nexusHasAnyPhrase(normalized, [
+      "добавь в календарь",
+      "добавь событие",
+      "создай событие",
+      "запланируй",
+      "поставь в календарь",
+      "add to calendar",
+      "create event",
+      "schedule",
+    ])
+  ) {
+    return null;
+  }
+
+  const title = nexusExtractAfterPhrase(
+    normalized,
+    [
+      "добавь в календарь",
+      "добавь событие",
+      "создай событие",
+      "запланируй",
+      "поставь в календарь",
+      "add to calendar",
+      "create event",
+      "schedule",
+    ]
+  );
+
+  return nexusCreateAction(
+    "calendar_create",
+    title || "Новое событие",
+    {
+      title: title || "Новое событие",
+      description: "",
+      date: "",
+      time: "",
+    },
+    {
+      priority: nexusDetectPriority(normalized),
+      requiresConfirmation: false,
+    }
+  );
+};
+
+const nexusPlanAlarmAction = (
+  text: string
+): NexusAction | null => {
+  const normalized = nexusNormalizeCommand(text);
+
+  if (
+    !nexusHasAnyPhrase(normalized, [
+      "поставь будильник",
+      "создай будильник",
+      "разбуди меня",
+      "будильник на",
+      "set an alarm",
+      "set alarm",
+      "wake me",
+    ])
+  ) {
+    return null;
+  }
+
+  const timeText = nexusExtractAfterPhrase(
+    normalized,
+    [
+      "поставь будильник",
+      "создай будильник",
+      "разбуди меня",
+      "будильник на",
+      "set an alarm",
+      "set alarm",
+      "wake me",
+    ]
+  );
+
+  return nexusCreateAction(
+    "alarm_create",
+    "Новый будильник",
+    {
+      timeText,
+      label: "",
+    },
+    {
+      priority: "high",
+      requiresConfirmation: false,
+    }
+  );
+};
+
+const nexusPlanTimerAction = (
+  text: string
+): NexusAction | null => {
+  const normalized = nexusNormalizeCommand(text);
+
+  if (
+    !nexusHasAnyPhrase(normalized, [
+      "поставь таймер",
+      "запусти таймер",
+      "таймер на",
+      "start timer",
+      "set timer",
+      "timer for",
+    ])
+  ) {
+    return null;
+  }
+
+  const durationText = nexusExtractAfterPhrase(
+    normalized,
+    [
+      "поставь таймер",
+      "запусти таймер",
+      "таймер на",
+      "start timer",
+      "set timer",
+      "timer for",
+    ]
+  );
+
+  return nexusCreateAction(
+    "timer_create",
+    "Новый таймер",
+    {
+      durationText,
+      name: "NEXUS Timer",
+    },
+    {
+      priority: "normal",
+      requiresConfirmation: false,
+    }
+  );
+};
+
+const nexusPlanSearchAction = (
+  text: string
+): NexusAction | null => {
+  const normalized = nexusNormalizeCommand(text);
+
+  if (
+    !nexusHasAnyPhrase(normalized, [
+      "найди",
+      "поищи",
+      "найти",
+      "search for",
+      "search",
+      "find",
+    ])
+  ) {
+    return null;
+  }
+
+  const query = nexusExtractAfterPhrase(
+    normalized,
+    [
+      "найди",
+      "поищи",
+      "найти",
+      "search for",
+      "search",
+      "find",
+    ]
+  );
+
+  if (!query) {
+    return null;
+  }
+
+  return nexusCreateAction(
+    "search",
+    `Поиск: ${query}`,
+    {
+      query,
+    },
+    {
+      priority: "low",
+      requiresConfirmation: false,
+    }
+  );
+};
+
+const nexusPlanSettingsAction = (
+  text: string
+): NexusAction | null => {
+  const normalized = nexusNormalizeCommand(text);
+
+  if (
+    nexusHasAnyPhrase(normalized, [
+      "включи уведомления",
+      "выключи уведомления",
+      "включи память",
+      "выключи память",
+      "включи автосохранение",
+      "выключи автосохранение",
+      "enable notifications",
+      "disable notifications",
+      "enable memory",
+      "disable memory",
+      "enable autosave",
+      "disable autosave",
+    ])
+  ) {
+    let setting = "";
+    let value = false;
+
+    if (
+      nexusHasAnyPhrase(normalized, [
+        "уведомления",
+        "notifications",
+      ])
+    ) {
+      setting = "notifications";
+    }
+
+    if (
+      nexusHasAnyPhrase(normalized, [
+        "память",
+        "memory",
+      ])
+    ) {
+      setting = "memoryEnabled";
+    }
+
+    if (
+      nexusHasAnyPhrase(normalized, [
+        "автосохранение",
+        "autosave",
+      ])
+    ) {
+      setting = "autoSave";
+    }
+
+    value = !nexusHasAnyPhrase(normalized, [
+      "выключи",
+      "выключить",
+      "отключи",
+      "отключить",
+      "disable",
+    ]);
+
+    return nexusCreateAction(
+      "settings_update",
+      `Изменить настройку: ${setting}`,
+      {
+        setting,
+        value,
+      },
+      {
+        requiresConfirmation: true,
+      }
+    );
+  }
+
+  return null;
+};
+
+const nexusBuildActionPlan = (
+  text: string
+): NexusActionPlan => {
+  const normalized = nexusNormalizeCommand(text);
+  const actions: NexusAction[] = [];
+
+  const planners = [
+    nexusPlanMemoryAction,
+    nexusPlanNoteAction,
+    nexusPlanTaskAction,
+    nexusPlanCalendarAction,
+    nexusPlanAlarmAction,
+    nexusPlanTimerAction,
+    nexusPlanSearchAction,
+    nexusPlanSettingsAction,
+  ];
+
+  for (const planner of planners) {
+    const action = planner(normalized);
+
+    if (action) {
+      actions.push(action);
+    }
+  }
+
+  if (actions.length === 0) {
+    actions.push(
+      nexusCreateAction(
+        "unknown",
+        "Неизвестная команда",
+        {
+          text,
+        },
+        {
+          requiresConfirmation: false,
+        }
+      )
+    );
+  }
+
+  const requiresConfirmation = actions.some(
+    (action) => action.requiresConfirmation
+  );
+
+  const confidence =
+    actions.length === 1 &&
+    actions[0].type !== "unknown"
+      ? 0.92
+      : actions[0].type === "unknown"
+      ? 0.15
+      : 0.76;
+
+  return {
+    originalText: text,
+    actions,
+    confidence,
+    requiresConfirmation,
+    explanation:
+      actions[0].type === "unknown"
+        ? "Команда не была однозначно распознана."
+        : `Распознано действий: ${actions.length}.`,
+  };
+};
+
+const nexusCanExecuteAction = (
+  action: NexusAction
+): boolean => {
+  if (action.type === "unknown") {
+    return false;
+  }
+
+  if (action.requiresConfirmation) {
+    return false;
+  }
+
+  return true;
+};
+
+const nexusGetExecutableActions = (
+  plan: NexusActionPlan
+): NexusAction[] => {
+  return plan.actions.filter(nexusCanExecuteAction);
+};
+
+const nexusGetConfirmationActions = (
+  plan: NexusActionPlan
+): NexusAction[] => {
+  return plan.actions.filter(
+    (action) => action.requiresConfirmation
+  );
+};
+
+const nexusDescribeAction = (
+  action: NexusAction
+): string => {
+  switch (action.type) {
+    case "memory_add":
+      return `Запомнить: ${String(
+        action.payload.content ?? ""
+      )}`;
+
+    case "memory_remove":
+      return `Удалить из памяти: ${String(
+        action.payload.query ?? ""
+      )}`;
+
+    case "note_create":
+      return `Создать заметку: ${action.title}`;
+
+    case "task_create":
+      return `Создать задачу: ${action.title}`;
+
+    case "task_complete":
+      return `Завершить задачу: ${String(
+        action.payload.query ?? ""
+      )}`;
+
+    case "task_delete":
+      return `Удалить задачу: ${String(
+        action.payload.query ?? ""
+      )}`;
+
+    case "calendar_create":
+      return `Создать событие: ${action.title}`;
+
+    case "alarm_create":
+      return `Поставить будильник: ${String(
+        action.payload.timeText ?? ""
+      )}`;
+
+    case "timer_create":
+      return `Запустить таймер: ${String(
+        action.payload.durationText ?? ""
+      )}`;
+
+    case "search":
+      return `Найти: ${String(
+        action.payload.query ?? ""
+      )}`;
+
+    case "settings_update":
+      return `Изменить настройку: ${String(
+        action.payload.setting ?? ""
+      )}`;
+
+    default:
+      return action.title;
+  }
+};
+
+const nexusFormatActionPlan = (
+  plan: NexusActionPlan
+): string => {
+  if (
+    plan.actions.length === 1 &&
+    plan.actions[0].type === "unknown"
+  ) {
+    return "Я не смог однозначно понять команду.";
+  }
+
+  return plan.actions
+    .map((action, index) => {
+      const confirmation = action.requiresConfirmation
+        ? " — требуется подтверждение"
+        : "";
+
+      return `${index + 1}. ${nexusDescribeAction(
+        action
+      )}${confirmation}`;
+    })
+    .join("\n");
+};
+
+const nexusActionRouter = (
+  userMessage: string
+): NexusActionPlan => {
+  const safeText = String(userMessage ?? "").trim();
+
+  if (!safeText) {
+    return {
+      originalText: "",
+      actions: [],
+      confidence: 0,
+      requiresConfirmation: false,
+    };
+  }
+
+  return nexusBuildActionPlan(safeText);
+};
+// ==============================
+// NEXUS — PART 37
+// ACTION EXECUTION PREPARATION ENGINE
+// ==============================
+
+type NexusExecutionStatus =
+  | "ready"
+  | "needs_confirmation"
+  | "unsupported"
+  | "invalid"
+  | "executed";
+
+type NexusExecutionResult = {
+  actionId: string;
+  status: NexusExecutionStatus;
+  message: string;
+  data?: Record<string, unknown>;
+  executedAt: number;
+};
+
+type NexusExecutionBatch = {
+  planId: string;
+  results: NexusExecutionResult[];
+  completed: boolean;
+  createdAt: number;
+};
+
+const nexusPlanId = () =>
+  `plan_${Date.now()}_${Math.random()
+    .toString(36)
+    .slice(2, 10)}`;
+
+const nexusValidateAction = (
+  action: NexusAction
+): boolean => {
+  if (!action.id || !action.type || !action.title) {
+    return false;
+  }
+
+  if (!action.payload) {
+    return false;
+  }
+
+  if (action.type === "unknown") {
+    return false;
+  }
+
+  return true;
+};
+
+const nexusPrepareAction = (
+  action: NexusAction
+): NexusExecutionResult => {
+  const now = Date.now();
+
+  if (!nexusValidateAction(action)) {
+    return {
+      actionId: action.id,
+      status: "invalid",
+      message: "Некорректное действие.",
+      executedAt: now,
+    };
+  }
+
+  if (action.requiresConfirmation) {
+    return {
+      actionId: action.id,
+      status: "needs_confirmation",
+      message: nexusDescribeAction(action),
+      executedAt: now,
+    };
+  }
+
+  if (!nexusCanExecuteAction(action)) {
+    return {
+      actionId: action.id,
+      status: "unsupported",
+      message: `Действие пока не может быть выполнено: ${action.title}`,
+      executedAt: now,
+    };
+  }
+
+  return {
+    actionId: action.id,
+    status: "ready",
+    message: nexusDescribeAction(action),
+    data: {
+      type: action.type,
+      payload: action.payload,
+    },
+    executedAt: now,
+  };
+};
+
+const nexusPreparePlanExecution = (
+  plan: NexusActionPlan
+): NexusExecutionBatch => {
+  const planId = nexusPlanId();
+
+  const results = plan.actions.map(
+    nexusPrepareAction
+  );
+
+  return {
+    planId,
+    results,
+    completed: false,
+    createdAt: Date.now(),
+  };
+};
+
+const nexusExecutionMessage = (
+  result: NexusExecutionResult
+): string => {
+  switch (result.status) {
+    case "ready":
+      return `Готово к выполнению: ${result.message}`;
+
+    case "needs_confirmation":
+      return `Требуется подтверждение: ${result.message}`;
+
+    case "unsupported":
+      return `Пока недоступно: ${result.message}`;
+
+    case "invalid":
+      return "Не удалось обработать действие.";
+
+    case "executed":
+      return `Выполнено: ${result.message}`;
+
+    default:
+      return result.message;
+  }
+};
+
+const nexusMarkExecutionComplete = (
+  batch: NexusExecutionBatch,
+  actionId: string
+): NexusExecutionBatch => {
+  const results = batch.results.map((result) => {
+    if (
+      result.actionId !== actionId ||
+      result.status !== "ready"
+    ) {
+      return result;
+    }
+
+    return {
+      ...result,
+      status: "executed",
+      executedAt: Date.now(),
+    };
+  });
+
+  const completed = results.every(
+    (result) =>
+      result.status === "executed" ||
+      result.status === "needs_confirmation" ||
+      result.status === "unsupported" ||
+      result.status === "invalid"
+  );
+
+  return {
+    ...batch,
+    results,
+    completed,
+  };
+};
+
+const nexusConfirmAction = (
+  action: NexusAction
+): NexusExecutionResult => {
+  const now = Date.now();
+
+  if (!nexusValidateAction(action)) {
+    return {
+      actionId: action.id,
+      status: "invalid",
+      message: "Некорректное действие.",
+      executedAt: now,
+    };
+  }
+
+  if (!action.requiresConfirmation) {
+    return {
+      actionId: action.id,
+      status: "ready",
+      message: nexusDescribeAction(action),
+      executedAt: now,
+    };
+  }
+
+  return {
+    actionId: action.id,
+    status: "executed",
+    message: nexusDescribeAction(action),
+    data: {
+      confirmed: true,
+      type: action.type,
+      payload: action.payload,
+    },
+    executedAt: now,
+  };
+};
+
+const nexusRejectAction = (
+  action: NexusAction
+): NexusExecutionResult => ({
+  actionId: action.id,
+  status: "unsupported",
+  message: `Действие отменено: ${action.title}`,
+  executedAt: Date.now(),
+});
+
+const nexusGetReadyResults = (
+  batch: NexusExecutionBatch
+): NexusExecutionResult[] => {
+  return batch.results.filter(
+    (result) => result.status === "ready"
+  );
+};
+
+const nexusGetPendingConfirmations = (
+  batch: NexusExecutionBatch
+): NexusExecutionResult[] => {
+  return batch.results.filter(
+    (result) =>
+      result.status === "needs_confirmation"
+  );
+};
+
+const nexusGetFailedResults = (
+  batch: NexusExecutionBatch
+): NexusExecutionResult[] => {
+  return batch.results.filter(
+    (result) =>
+      result.status === "invalid" ||
+      result.status === "unsupported"
+  );
+};
+
+const nexusExecutionSummary = (
+  batch: NexusExecutionBatch
+): string => {
+  const ready = nexusGetReadyResults(batch).length;
+  const confirmation =
+    nexusGetPendingConfirmations(batch).length;
+  const failed = nexusGetFailedResults(batch).length;
+  const executed = batch.results.filter(
+    (result) => result.status === "executed"
+  ).length;
+
+  return [
+    `Выполнено: ${executed}`,
+    `Готово: ${ready}`,
+    `Подтверждение: ${confirmation}`,
+    `Проблемы: ${failed}`,
+  ].join(" • ");
+};
+// ==============================
+// NEXUS — PART 38
+// UNIFIED ACTION HISTORY ENGINE
+// ==============================
+
+type NexusActionHistoryStatus =
+  | "created"
+  | "confirmed"
+  | "cancelled"
+  | "executed"
+  | "failed";
+
+type NexusActionHistoryItem = {
+  id: string;
+  actionId: string;
+  planId?: string;
+  type: NexusActionType;
+  title: string;
+  status: NexusActionHistoryStatus;
+  payload: Record<string, unknown>;
+  createdAt: number;
+  updatedAt: number;
+  error?: string;
+};
+
+type NexusActionHistoryFilter = {
+  type?: NexusActionType;
+  status?: NexusActionHistoryStatus;
+  from?: number;
+  to?: number;
+  query?: string;
+};
+
+const nexusActionHistoryId = () =>
+  `history_${Date.now()}_${Math.random()
+    .toString(36)
+    .slice(2, 10)}`;
+
+const nexusCreateHistoryItem = (
+  action: NexusAction,
+  status: NexusActionHistoryStatus = "created",
+  planId?: string
+): NexusActionHistoryItem => {
+  const now = Date.now();
+
+  return {
+    id: nexusActionHistoryId(),
+    actionId: action.id,
+    planId,
+    type: action.type,
+    title: action.title,
+    status,
+    payload: { ...action.payload },
+    createdAt: now,
+    updatedAt: now,
+  };
+};
+
+const nexusUpdateHistoryItem = (
+  item: NexusActionHistoryItem,
+  status: NexusActionHistoryStatus,
+  error?: string
+): NexusActionHistoryItem => ({
+  ...item,
+  status,
+  updatedAt: Date.now(),
+  ...(error ? { error } : {}),
+});
+
+const nexusFilterActionHistory = (
+  history: NexusActionHistoryItem[],
+  filter: NexusActionHistoryFilter
+): NexusActionHistoryItem[] => {
+  const query = filter.query
+    ? nexusNormalizeCommand(filter.query)
+    : "";
+
+  return history.filter((item) => {
+    if (filter.type && item.type !== filter.type) {
+      return false;
+    }
+
+    if (
+      filter.status &&
+      item.status !== filter.status
+    ) {
+      return false;
+    }
+
+    if (
+      typeof filter.from === "number" &&
+      item.createdAt < filter.from
+    ) {
+      return false;
+    }
+
+    if (
+      typeof filter.to === "number" &&
+      item.createdAt > filter.to
+    ) {
+      return false;
+    }
+
+    if (
+      query &&
+      !nexusNormalizeCommand(item.title).includes(query)
+    ) {
+      return false;
+    }
+
+    return true;
+  });
+};
+
+const nexusSortActionHistory = (
+  history: NexusActionHistoryItem[],
+  newestFirst = true
+): NexusActionHistoryItem[] => {
+  return [...history].sort((a, b) =>
+    newestFirst
+      ? b.createdAt - a.createdAt
+      : a.createdAt - b.createdAt
+  );
+};
+
+const nexusAddHistoryItem = (
+  history: NexusActionHistoryItem[],
+  item: NexusActionHistoryItem,
+  limit = 500
+): NexusActionHistoryItem[] => {
+  const next = [...history, item];
+
+  if (next.length <= limit) {
+    return next;
+  }
+
+  return next.slice(next.length - limit);
+};
+
+const nexusRemoveHistoryItem = (
+  history: NexusActionHistoryItem[],
+  historyId: string
+): NexusActionHistoryItem[] => {
+  return history.filter(
+    (item) => item.id !== historyId
+  );
+};
+
+const nexusClearActionHistory = (
+  history: NexusActionHistoryItem[],
+  before?: number
+): NexusActionHistoryItem[] => {
+  if (typeof before !== "number") {
+    return [];
+  }
+
+  return history.filter(
+    (item) => item.createdAt >= before
+  );
+};
+
+const nexusGetLatestAction = (
+  history: NexusActionHistoryItem[]
+): NexusActionHistoryItem | null => {
+  if (history.length === 0) {
+    return null;
+  }
+
+  return nexusSortActionHistory(history, true)[0];
+};
+
+const nexusGetActionHistoryStats = (
+  history: NexusActionHistoryItem[]
+) => {
+  const stats: Record<
+    NexusActionHistoryStatus,
+    number
+  > = {
+    created: 0,
+    confirmed: 0,
+    cancelled: 0,
+    executed: 0,
+    failed: 0,
+  };
+
+  for (const item of history) {
+    stats[item.status] += 1;
+  }
+
+  return {
+    total: history.length,
+    ...stats,
+  };
+};
+
+const nexusHistoryToText = (
+  history: NexusActionHistoryItem[]
+): string => {
+  if (history.length === 0) {
+    return "История действий пуста.";
+  }
+
+  return nexusSortActionHistory(history, true)
+    .slice(0, 20)
+    .map((item, index) => {
+      const date = new Date(
+        item.updatedAt
+      ).toLocaleString();
+
+      return `${index + 1}. ${item.title} — ${item.status} — ${date}`;
+    })
+    .join("\n");
+};
+
+const nexusCreateHistoryFromPlan = (
+  plan: NexusActionPlan,
+  planId?: string
+): NexusActionHistoryItem[] => {
+  return plan.actions.map((action) =>
+    nexusCreateHistoryItem(
+      action,
+      action.requiresConfirmation
+        ? "created"
+        : "created",
+      planId
+    )
+  );
+};
+
