@@ -26625,4 +26625,713 @@ async function nexusPingLiveAI(): Promise<boolean> {
 
   return result.success;
 }
+// ============================================================
+// NEXUS — PART 47
+// FINAL AI RESPONSE + ERROR + CONTEXT HANDLER
+// ============================================================
+
+type NexusFinalAIState = {
+  lastUserMessage: string;
+  lastAIMessage: string;
+  lastError: string;
+  requestCount: number;
+  successCount: number;
+  errorCount: number;
+  updatedAt: number;
+};
+
+const nexusFinalAIState: NexusFinalAIState = {
+  lastUserMessage: "",
+  lastAIMessage: "",
+  lastError: "",
+  requestCount: 0,
+  successCount: 0,
+  errorCount: 0,
+  updatedAt: Date.now(),
+};
+
+function nexusPrepareFinalAIHistory(
+  messages: NexusAIMessage[] = []
+): NexusAIMessage[] {
+  return messages
+    .filter(
+      (message) =>
+        message &&
+        (message.role === "user" ||
+          message.role === "assistant") &&
+        typeof message.content === "string" &&
+        message.content.trim()
+    )
+    .slice(-24);
+}
+
+function nexusBuildFinalAIInstruction(
+  language?: string
+): string {
+  const languageInstruction =
+    language
+      ? `Отвечай на языке пользователя. Текущий язык интерфейса: ${language}.`
+      : "Отвечай на языке последнего сообщения пользователя.";
+
+  return `
+Ты — NEXUS, персональный AI-помощник.
+
+${languageInstruction}
+
+Основные правила:
+- отвечай естественно;
+- учитывай предыдущий контекст;
+- учитывай доступные данные пользователя;
+- не выдумывай информацию;
+- не повторяй вопрос пользователя без необходимости;
+- если вопрос простой, отвечай кратко;
+- если требуется объяснение, объясняй понятно;
+- поддерживай стиль общения пользователя;
+- не создавай отдельный образ или персонажа;
+- если информации недостаточно, прямо скажи об этом.
+
+NEXUS может работать с чатами, памятью,
+заметками, задачами, календарём,
+таймерами, будильниками и файлами,
+если соответствующий контекст передан системе.
+`;
+}
+
+async function nexusRunFinalAI(
+  message: string,
+  history: NexusAIMessage[] = [],
+  language?: string
+): Promise<string> {
+  const cleanMessage =
+    nexusCleanLiveAIMessage(message);
+
+  if (
+    !nexusValidateLiveAIMessage(
+      cleanMessage
+    )
+  ) {
+    return "Напиши сообщение, и я отвечу.";
+  }
+
+  nexusFinalAIState.requestCount += 1;
+  nexusFinalAIState.lastUserMessage =
+    cleanMessage;
+  nexusFinalAIState.lastError = "";
+
+  const cleanHistory =
+    nexusPrepareFinalAIHistory(
+      history
+    );
+
+  try {
+    const result =
+      await nexusCallLiveAI({
+        message: cleanMessage,
+        history: cleanHistory,
+        system:
+          nexusBuildFinalAIInstruction(
+            language
+          ),
+        model: "gpt-5.6",
+      });
+
+    if (!result.success) {
+      nexusFinalAIState.errorCount += 1;
+      nexusFinalAIState.lastError =
+        result.error || "AI error";
+      nexusFinalAIState.updatedAt =
+        Date.now();
+
+      return (
+        "Не удалось получить ответ от NEXUS. " +
+        "Проверь подключение к AI."
+      );
+    }
+
+    nexusFinalAIState.successCount += 1;
+    nexusFinalAIState.lastAIMessage =
+      result.text;
+    nexusFinalAIState.updatedAt =
+      Date.now();
+
+    return result.text;
+  } catch (error) {
+    nexusFinalAIState.errorCount += 1;
+    nexusFinalAIState.lastError =
+      error instanceof Error
+        ? error.message
+        : "Unknown error";
+    nexusFinalAIState.updatedAt =
+      Date.now();
+
+    return (
+      "Произошла ошибка при обращении к NEXUS AI."
+    );
+  }
+}
+
+function nexusGetFinalAIStatistics() {
+  return {
+    requests:
+      nexusFinalAIState.requestCount,
+    successful:
+      nexusFinalAIState.successCount,
+    errors:
+      nexusFinalAIState.errorCount,
+    lastMessage:
+      nexusFinalAIState.lastUserMessage,
+    lastResponse:
+      nexusFinalAIState.lastAIMessage,
+    lastError:
+      nexusFinalAIState.lastError,
+    updatedAt:
+      nexusFinalAIState.updatedAt,
+  };
+}
+
+function nexusResetFinalAIStatistics() {
+  nexusFinalAIState.requestCount = 0;
+  nexusFinalAIState.successCount = 0;
+  nexusFinalAIState.errorCount = 0;
+  nexusFinalAIState.lastUserMessage = "";
+  nexusFinalAIState.lastAIMessage = "";
+  nexusFinalAIState.lastError = "";
+  nexusFinalAIState.updatedAt = Date.now();
+}
+// ============================================================
+// NEXUS — PART 48
+// FINAL UNIFIED AI CONTEXT BUILDER
+// ============================================================
+
+type NexusUnifiedContextInput = {
+  userMessage: string;
+  memory?: MemoryItem[];
+  notes?: Note[];
+  tasks?: Task[];
+  events?: CalendarEvent[];
+  timers?: Timer[];
+  files?: NexusFile[];
+  messages?: Message[];
+  language?: string;
+};
+
+function nexusLimitText(
+  value: string,
+  max = 4000
+): string {
+  return value
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, max);
+}
+
+function nexusBuildUnifiedMemory(
+  memory: MemoryItem[] = []
+): string {
+  if (!memory.length) {
+    return "Память пользователя пуста.";
+  }
+
+  return memory
+    .slice(-30)
+    .map(
+      (item) =>
+        `- ${item.category}: ${nexusLimitText(
+          item.content
+        )}`
+    )
+    .join("\n");
+}
+
+function nexusBuildUnifiedTasks(
+  tasks: Task[] = []
+): string {
+  if (!tasks.length) {
+    return "Активных задач нет.";
+  }
+
+  return tasks
+    .filter((task) => !task.completed)
+    .slice(0, 20)
+    .map(
+      (task) =>
+        `- ${nexusLimitText(task.title)}${
+          task.dueDate
+            ? ` — ${task.dueDate}`
+            : ""
+        }${
+          task.dueTime
+            ? ` ${task.dueTime}`
+            : ""
+        }`
+    )
+    .join("\n");
+}
+
+function nexusBuildUnifiedNotes(
+  notes: Note[] = []
+): string {
+  if (!notes.length) {
+    return "Заметок нет.";
+  }
+
+  return notes
+    .slice(-15)
+    .map(
+      (note) =>
+        `- ${nexusLimitText(note.title)}: ${nexusLimitText(
+          note.content,
+          1200
+        )}`
+    )
+    .join("\n");
+}
+
+function nexusBuildUnifiedCalendar(
+  events: CalendarEvent[] = []
+): string {
+  if (!events.length) {
+    return "Запланированных событий нет.";
+  }
+
+  return events
+    .slice(-20)
+    .map(
+      (event) =>
+        `- ${nexusLimitText(event.title)} — ${
+          event.date
+        }${
+          event.time
+            ? ` ${event.time}`
+            : ""
+        }`
+    )
+    .join("\n");
+}
+
+function nexusBuildUnifiedTimers(
+  timers: Timer[] = []
+): string {
+  if (!timers.length) {
+    return "Активных таймеров нет.";
+  }
+
+  return timers
+    .filter((timer) => timer.running)
+    .slice(0, 10)
+    .map(
+      (timer) =>
+        `- ${nexusLimitText(
+          timer.name
+        )}: ${timer.remaining} сек.`
+    )
+    .join("\n");
+}
+
+function nexusBuildUnifiedRecentChat(
+  messages: Message[] = []
+): string {
+  if (!messages.length) {
+    return "История текущего чата пуста.";
+  }
+
+  return messages
+    .slice(-20)
+    .map(
+      (message) =>
+        `${message.role === "user" ? "Пользователь" : "NEXUS"}: ${nexusLimitText(
+          message.content,
+          1500
+        )}`
+    )
+    .join("\n");
+}
+
+function nexusBuildUnifiedContext(
+  input: NexusUnifiedContextInput
+): string {
+  return `
+=== NEXUS CONTEXT ===
+
+Язык:
+${input.language || "не указан"}
+
+Память:
+${nexusBuildUnifiedMemory(
+  input.memory
+)}
+
+Задачи:
+${nexusBuildUnifiedTasks(
+  input.tasks
+)}
+
+Заметки:
+${nexusBuildUnifiedNotes(
+  input.notes
+)}
+
+Календарь:
+${nexusBuildUnifiedCalendar(
+  input.events
+)}
+
+Таймеры:
+${nexusBuildUnifiedTimers(
+  input.timers
+)}
+
+Последние сообщения:
+${nexusBuildUnifiedRecentChat(
+  input.messages
+)}
+
+Текущий запрос:
+${nexusLimitText(
+  input.userMessage,
+  8000
+)}
+
+=== END NEXUS CONTEXT ===
+`;
+}
+
+async function nexusAskWithUnifiedContext(
+  input: NexusUnifiedContextInput
+): Promise<string> {
+  const context =
+    nexusBuildUnifiedContext(input);
+
+  return nexusRunFinalAI(
+    input.userMessage,
+    [
+      {
+        role: "user",
+        content: context,
+      },
+    ],
+    input.language
+  );
+}
+// ============================================================
+// NEXUS — PART 49
+// FINAL APPLICATION BRIDGE
+// ============================================================
+
+type NexusApplicationBridge = {
+  ask: (
+    message: string,
+    context?: NexusUnifiedContextInput
+  ) => Promise<string>;
+  status: () => NexusLiveAIStatus;
+  statistics: () => ReturnType<
+    typeof nexusGetFinalAIStatistics
+  >;
+};
+
+const nexusApplicationBridge: NexusApplicationBridge = {
+  async ask(
+    message,
+    context = {}
+  ) {
+    return nexusAskWithUnifiedContext({
+      ...context,
+      userMessage: message,
+    });
+  },
+
+  status() {
+    return nexusGetLiveAIStatus();
+  },
+
+  statistics() {
+    return nexusGetFinalAIStatistics();
+  },
+};
+
+async function nexusAsk(
+  message: string,
+  context?: NexusUnifiedContextInput
+): Promise<string> {
+  return nexusApplicationBridge.ask(
+    message,
+    context
+  );
+}
+
+function nexusAIReady(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    typeof fetch === "function"
+  );
+}
+
+function nexusGetConnectionInfo() {
+  return {
+    ready: nexusAIReady(),
+    status:
+      nexusApplicationBridge.status(),
+    endpoint: "/api/chat",
+    model: "gpt-5.6",
+  };
+}
+
+// Быстрый тест соединения NEXUS AI.
+async function nexusTestConnection(): Promise<{
+  success: boolean;
+  response: string;
+}> {
+  const response =
+    await nexusAsk(
+      "Ответь коротко: NEXUS работает."
+    );
+
+  const success =
+    response.length > 0 &&
+    !response.startsWith(
+      "Не удалось получить ответ"
+    );
+
+  return {
+    success,
+    response,
+  };
+}
+// ============================================================
+// NEXUS — PART 50
+// ⚠️ ПОСЛЕДНИЙ КУСОК КОДА
+// FINAL AI CHAT COMPONENT
+// ============================================================
+
+type NexusFinalChatProps = {
+  language?: string;
+};
+
+function NexusFinalAIChat(
+  props: NexusFinalChatProps
+) {
+  const [messages, setMessages] =
+    useState<NexusAIMessage[]>([]);
+
+  const [input, setInput] =
+    useState("");
+
+  const [loading, setLoading] =
+    useState(false);
+
+  const [error, setError] =
+    useState("");
+
+  const inputRef =
+    useRef<HTMLTextAreaElement>(null);
+
+  const send = async () => {
+    const text =
+      input.trim();
+
+    if (!text || loading) {
+      return;
+    }
+
+    setInput("");
+    setError("");
+    setLoading(true);
+
+    const userMessage: NexusAIMessage = {
+      role: "user",
+      content: text,
+    };
+
+    const history = [
+      ...messages,
+      userMessage,
+    ];
+
+    setMessages(history);
+
+    try {
+      const answer =
+        await nexusRunFinalAI(
+          text,
+          messages,
+          props.language
+        );
+
+      setMessages([
+        ...history,
+        {
+          role: "assistant",
+          content: answer,
+        },
+      ]);
+    } catch {
+      setError(
+        "Не удалось получить ответ от NEXUS."
+      );
+    } finally {
+      setLoading(false);
+
+      setTimeout(() => {
+        inputRef.current?.focus();
+      }, 0);
+    }
+  };
+
+  const handleKeyDown = (
+    event: KeyboardEvent<HTMLTextAreaElement>
+  ) => {
+    if (
+      event.key === "Enter" &&
+      !event.shiftKey
+    ) {
+      event.preventDefault();
+      void send();
+    }
+  };
+
+  return (
+    <div
+      style={{
+        width: "100%",
+        maxWidth: 900,
+        margin: "0 auto",
+        display: "flex",
+        flexDirection: "column",
+        minHeight: "70vh",
+      }}
+    >
+      <div
+        style={{
+          flex: 1,
+          display: "flex",
+          flexDirection: "column",
+          gap: 12,
+          padding: 20,
+          overflowY: "auto",
+        }}
+      >
+        {messages.length === 0 && (
+          <div
+            style={{
+              margin: "auto",
+              textAlign: "center",
+              opacity: 0.65,
+            }}
+          >
+            <h1>NEXUS</h1>
+            <p>
+              Готов отвечать на твои вопросы.
+            </p>
+          </div>
+        )}
+
+        {messages.map(
+          (message, index) => (
+            <div
+              key={`${index}-${message.role}`}
+              style={{
+                alignSelf:
+                  message.role === "user"
+                    ? "flex-end"
+                    : "flex-start",
+                maxWidth: "85%",
+                padding: "12px 16px",
+                borderRadius: 16,
+                background:
+                  message.role === "user"
+                    ? "var(--nexus-user-message, #eeeeee)"
+                    : "var(--nexus-ai-message, #f6f6f6)",
+                whiteSpace: "pre-wrap",
+                wordBreak:
+                  "break-word",
+              }}
+            >
+              {message.content}
+            </div>
+          )
+        )}
+
+        {loading && (
+          <div
+            style={{
+              alignSelf: "flex-start",
+              padding: "12px 16px",
+              opacity: 0.6,
+            }}
+          >
+            NEXUS думает…
+          </div>
+        )}
+
+        {error && (
+          <div
+            style={{
+              padding: 12,
+              color: "crimson",
+            }}
+          >
+            {error}
+          </div>
+        )}
+      </div>
+
+      <div
+        style={{
+          display: "flex",
+          gap: 8,
+          padding: 12,
+          borderTop:
+            "1px solid rgba(0,0,0,.08)",
+        }}
+      >
+        <textarea
+          ref={inputRef}
+          value={input}
+          onChange={(event) =>
+            setInput(event.target.value)
+          }
+          onKeyDown={handleKeyDown}
+          placeholder="Напиши NEXUS..."
+          disabled={loading}
+          rows={1}
+          style={{
+            flex: 1,
+            resize: "none",
+            border: "1px solid rgba(0,0,0,.15)",
+            borderRadius: 14,
+            padding: "12px 14px",
+            outline: "none",
+            fontSize: 16,
+          }}
+        />
+
+        <button
+          type="button"
+          onClick={() => void send()}
+          disabled={
+            loading ||
+            !input.trim()
+          }
+          style={{
+            minWidth: 54,
+            border: 0,
+            borderRadius: 14,
+            cursor:
+              loading ||
+              !input.trim()
+                ? "default"
+                : "pointer",
+            fontSize: 18,
+          }}
+        >
+          ↑
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// END OF NEXUS CODE PARTS
+// ============================================================
 
