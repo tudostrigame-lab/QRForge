@@ -24753,4 +24753,1876 @@ const nexusCreateHistoryFromPlan = (
     )
   );
 };
+// ==============================
+// NEXUS — PART 39
+// REAL OPENAI AI BRIDGE
+// ==============================
+
+type NexusAIMessage = {
+  role: "user" | "assistant" | "system";
+  content: string;
+};
+
+type NexusAIResponse = {
+  ok: boolean;
+  text: string;
+  error?: string;
+};
+
+type NexusAIConfig = {
+  endpoint: string;
+  model?: string;
+  timeoutMs?: number;
+};
+
+const nexusAIConfig: NexusAIConfig = {
+  endpoint: "/api/chat",
+  model: "gpt-5.6",
+  timeoutMs: 60000,
+};
+
+const nexusBuildAIHistory = (
+  messages: Array<{
+    role: "user" | "assistant";
+    content: string;
+  }>,
+  limit = 20
+): NexusAIMessage[] => {
+  return messages
+    .slice(-limit)
+    .map((message) => ({
+      role: message.role,
+      content: String(message.content ?? ""),
+    }))
+    .filter(
+      (message) => message.content.trim().length > 0
+    );
+};
+
+const nexusBuildAISystemInstruction = (
+  context?: string
+): string => {
+  const base = [
+    "Ты NEXUS — персональный AI-помощник.",
+    "Отвечай естественно и понятно.",
+    "Адаптируй стиль общения под пользователя.",
+    "Не придумывай факты, которых не знаешь.",
+    "Если пользователь просит выполнить действие внутри NEXUS, используй доступный контекст приложения.",
+    "Не объясняй внутреннюю архитектуру NEXUS без необходимости.",
+  ];
+
+  if (context?.trim()) {
+    base.push(
+      "",
+      "Контекст NEXUS:",
+      context.trim()
+    );
+  }
+
+  return base.join("\n");
+};
+
+const nexusRequestAI = async (
+  messages: NexusAIMessage[],
+  context?: string
+): Promise<NexusAIResponse> => {
+  const controller = new AbortController();
+
+  const timeout = window.setTimeout(() => {
+    controller.abort();
+  }, nexusAIConfig.timeoutMs ?? 60000);
+
+  try {
+    const response = await fetch(
+      nexusAIConfig.endpoint,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: nexusAIConfig.model,
+          messages,
+          system: nexusBuildAISystemInstruction(
+            context
+          ),
+        }),
+        signal: controller.signal,
+      }
+    );
+
+    const rawText = await response.text();
+
+    let data: {
+      text?: string;
+      output_text?: string;
+      response?: string;
+      error?: string | {
+        message?: string;
+      };
+    } = {};
+
+    try {
+      data = JSON.parse(rawText);
+    } catch {
+      data = {};
+    }
+
+    if (!response.ok) {
+      const errorMessage =
+        typeof data.error === "string"
+          ? data.error
+          : data.error?.message ||
+            rawText ||
+            `HTTP ${response.status}`;
+
+      return {
+        ok: false,
+        text: "",
+        error: errorMessage,
+      };
+    }
+
+    const text =
+      data.text ||
+      data.output_text ||
+      data.response ||
+      "";
+
+    if (!text.trim()) {
+      return {
+        ok: false,
+        text: "",
+        error: "AI вернул пустой ответ.",
+      };
+    }
+
+    return {
+      ok: true,
+      text: text.trim(),
+    };
+  } catch (error) {
+    if (
+      error instanceof DOMException &&
+      error.name === "AbortError"
+    ) {
+      return {
+        ok: false,
+        text: "",
+        error: "Время ожидания AI истекло.",
+      };
+    }
+
+    return {
+      ok: false,
+      text: "",
+      error:
+        error instanceof Error
+          ? error.message
+          : "Не удалось подключиться к AI.",
+    };
+  } finally {
+    window.clearTimeout(timeout);
+  }
+};
+
+const generateNexusAIResponse = async (
+  userMessage: string,
+  history: NexusAIMessage[] = [],
+  context = ""
+): Promise<string> => {
+  const messages: NexusAIMessage[] = [
+    ...nexusBuildAIHistory(history),
+    {
+      role: "user",
+      content: userMessage,
+    },
+  ];
+
+  const result = await nexusRequestAI(
+    messages,
+    context
+  );
+
+  if (result.ok) {
+    return result.text;
+  }
+
+  throw new Error(
+    result.error || "Ошибка NEXUS AI"
+  );
+};
+
+const nexusTestAIConnection =
+  async (): Promise<boolean> => {
+    try {
+      const result = await nexusRequestAI([
+        {
+          role: "user",
+          content:
+            "Ответь одним словом: работает",
+        },
+      ]);
+
+      return result.ok;
+    } catch {
+      return false;
+    }
+  };
+
+// ==============================
+// AI CONTEXT BUILDER
+// ==============================
+
+const nexusBuildRuntimeContext = (
+  data: {
+    memory?: unknown[];
+    tasks?: unknown[];
+    notes?: unknown[];
+    events?: unknown[];
+    timers?: unknown[];
+  }
+): string => {
+  const sections: string[] = [];
+
+  if (data.memory?.length) {
+    sections.push(
+      `Память:\n${JSON.stringify(
+        data.memory.slice(0, 20)
+      )}`
+    );
+  }
+
+  if (data.tasks?.length) {
+    sections.push(
+      `Задачи:\n${JSON.stringify(
+        data.tasks.slice(0, 20)
+      )}`
+    );
+  }
+
+  if (data.notes?.length) {
+    sections.push(
+      `Заметки:\n${JSON.stringify(
+        data.notes.slice(0, 10)
+      )}`
+    );
+  }
+
+  if (data.events?.length) {
+    sections.push(
+      `Календарь:\n${JSON.stringify(
+        data.events.slice(0, 20)
+      )}`
+    );
+  }
+
+  if (data.timers?.length) {
+    sections.push(
+      `Таймеры:\n${JSON.stringify(
+        data.timers.slice(0, 10)
+      )}`
+    );
+  }
+
+  return sections.join("\n\n");
+};
+// ==============================
+// NEXUS — PART 40
+// AI CHAT INTEGRATION LAYER
+// ==============================
+
+type NexusAIIntegrationState = {
+  enabled: boolean;
+  connected: boolean;
+  lastError: string;
+  lastResponseAt: number | null;
+};
+
+const nexusAIIntegrationState: NexusAIIntegrationState = {
+  enabled: true,
+  connected: false,
+  lastError: "",
+  lastResponseAt: null,
+};
+
+const nexusPrepareChatForAI = (
+  chat: {
+    messages?: Array<{
+      role: "user" | "assistant";
+      content: string;
+    }>;
+  },
+  userMessage: string
+): NexusAIMessage[] => {
+  const history = nexusBuildAIHistory(
+    chat.messages ?? [],
+    24
+  );
+
+  return [
+    ...history,
+    {
+      role: "user",
+      content: userMessage.trim(),
+    },
+  ];
+};
+
+const nexusSendChatToAI = async (
+  chat: {
+    messages?: Array<{
+      role: "user" | "assistant";
+      content: string;
+    }>;
+  },
+  userMessage: string,
+  context = ""
+): Promise<NexusAIResponse> => {
+  const cleanMessage = userMessage.trim();
+
+  if (!cleanMessage) {
+    return {
+      ok: false,
+      text: "",
+      error: "Пустое сообщение.",
+    };
+  }
+
+  const messages =
+    nexusPrepareChatForAI(
+      chat,
+      cleanMessage
+    );
+
+  const result = await nexusRequestAI(
+    messages,
+    context
+  );
+
+  if (result.ok) {
+    nexusAIIntegrationState.connected = true;
+    nexusAIIntegrationState.lastError = "";
+    nexusAIIntegrationState.lastResponseAt =
+      Date.now();
+  } else {
+    nexusAIIntegrationState.connected = false;
+    nexusAIIntegrationState.lastError =
+      result.error || "Неизвестная ошибка AI";
+  }
+
+  return result;
+};
+
+// ==============================
+// AI RESPONSE NORMALIZER
+// ==============================
+
+const nexusNormalizeAIResponse = (
+  value: unknown
+): string => {
+  if (typeof value === "string") {
+    return value.trim();
+  }
+
+  if (
+    value &&
+    typeof value === "object"
+  ) {
+    const object = value as {
+      text?: unknown;
+      content?: unknown;
+      output_text?: unknown;
+    };
+
+    if (typeof object.text === "string") {
+      return object.text.trim();
+    }
+
+    if (
+      typeof object.output_text === "string"
+    ) {
+      return object.output_text.trim();
+    }
+
+    if (
+      typeof object.content === "string"
+    ) {
+      return object.content.trim();
+    }
+  }
+
+  return "";
+};
+
+// ==============================
+// AI FALLBACK
+// ==============================
+
+const nexusAIErrorResponse = (
+  error?: string
+): string => {
+  const normalized = String(
+    error || ""
+  ).toLowerCase();
+
+  if (
+    normalized.includes("401") ||
+    normalized.includes("unauthorized") ||
+    normalized.includes("api key")
+  ) {
+    return "Не удалось авторизоваться в AI. Проверь API-ключ на сервере.";
+  }
+
+  if (
+    normalized.includes("429") ||
+    normalized.includes("rate")
+  ) {
+    return "AI временно перегружен. Попробуй ещё раз через несколько секунд.";
+  }
+
+  if (
+    normalized.includes("timeout") ||
+    normalized.includes("истек")
+  ) {
+    return "AI слишком долго отвечает. Попробуй ещё раз.";
+  }
+
+  if (
+    normalized.includes("failed to fetch") ||
+    normalized.includes("network")
+  ) {
+    return "Не удалось подключиться к серверу AI.";
+  }
+
+  return "Произошла ошибка при обращении к AI.";
+};
+
+// ==============================
+// AI MESSAGE PIPELINE
+// ==============================
+
+const nexusProcessAIMessage = async (
+  chat: {
+    messages?: Array<{
+      role: "user" | "assistant";
+      content: string;
+    }>;
+  },
+  message: string,
+  runtimeContext = ""
+): Promise<string> => {
+  const result =
+    await nexusSendChatToAI(
+      chat,
+      message,
+      runtimeContext
+    );
+
+  if (!result.ok) {
+    return nexusAIErrorResponse(
+      result.error
+    );
+  }
+
+  const normalized =
+    nexusNormalizeAIResponse(
+      result.text
+    );
+
+  if (!normalized) {
+    return "AI не вернул текстовый ответ.";
+  }
+
+  return normalized;
+};
+
+// ==============================
+// AI HEALTH STATUS
+// ==============================
+
+const nexusGetAIStatus = () => ({
+  enabled:
+    nexusAIIntegrationState.enabled,
+  connected:
+    nexusAIIntegrationState.connected,
+  lastError:
+    nexusAIIntegrationState.lastError,
+  lastResponseAt:
+    nexusAIIntegrationState.lastResponseAt,
+});
+
+const nexusResetAIStatus = () => {
+  nexusAIIntegrationState.connected =
+    false;
+  nexusAIIntegrationState.lastError = "";
+  nexusAIIntegrationState.lastResponseAt =
+    null;
+};
+// ==============================
+// NEXUS — PART 41
+// AI CONTEXT + MEMORY INTEGRATION
+// ==============================
+
+type NexusContextSource =
+  | "memory"
+  | "tasks"
+  | "notes"
+  | "calendar"
+  | "timers"
+  | "chat"
+  | "settings";
+
+type NexusContextBlock = {
+  source: NexusContextSource;
+  content: string;
+  priority: number;
+};
+
+type NexusAIContextPackage = {
+  blocks: NexusContextBlock[];
+  text: string;
+  createdAt: number;
+};
+
+const nexusContextBlock = (
+  source: NexusContextSource,
+  content: string,
+  priority: number
+): NexusContextBlock => ({
+  source,
+  content: content.trim(),
+  priority,
+});
+
+const nexusSafeJson = (
+  value: unknown,
+  maxLength = 5000
+): string => {
+  try {
+    const result = JSON.stringify(
+      value ?? null
+    );
+
+    return result.length > maxLength
+      ? result.slice(0, maxLength) + "..."
+      : result;
+  } catch {
+    return "";
+  }
+};
+
+const nexusBuildMemoryContext = (
+  memory: unknown[]
+): NexusContextBlock | null => {
+  if (!memory.length) {
+    return null;
+  }
+
+  return nexusContextBlock(
+    "memory",
+    nexusSafeJson(
+      memory.slice(0, 30),
+      7000
+    ),
+    100
+  );
+};
+
+const nexusBuildTaskContext = (
+  tasks: unknown[]
+): NexusContextBlock | null => {
+  if (!tasks.length) {
+    return null;
+  }
+
+  return nexusContextBlock(
+    "tasks",
+    nexusSafeJson(
+      tasks.slice(0, 30),
+      6000
+    ),
+    80
+  );
+};
+
+const nexusBuildNoteContext = (
+  notes: unknown[]
+): NexusContextBlock | null => {
+  if (!notes.length) {
+    return null;
+  }
+
+  return nexusContextBlock(
+    "notes",
+    nexusSafeJson(
+      notes.slice(0, 15),
+      6000
+    ),
+    60
+  );
+};
+
+const nexusBuildCalendarContext = (
+  events: unknown[]
+): NexusContextBlock | null => {
+  if (!events.length) {
+    return null;
+  }
+
+  return nexusContextBlock(
+    "calendar",
+    nexusSafeJson(
+      events.slice(0, 30),
+      6000
+    ),
+    70
+  );
+};
+
+const nexusBuildTimerContext = (
+  timers: unknown[]
+): NexusContextBlock | null => {
+  if (!timers.length) {
+    return null;
+  }
+
+  return nexusContextBlock(
+    "timers",
+    nexusSafeJson(
+      timers.slice(0, 15),
+      3000
+    ),
+    50
+  );
+};
+
+const nexusBuildChatContext = (
+  messages: Array<{
+    role: "user" | "assistant";
+    content: string;
+  }>
+): NexusContextBlock | null => {
+  if (!messages.length) {
+    return null;
+  }
+
+  const recent = messages
+    .slice(-12)
+    .map(
+      (message) =>
+        `${message.role}: ${message.content}`
+    )
+    .join("\n");
+
+  return nexusContextBlock(
+    "chat",
+    recent,
+    90
+  );
+};
+
+const nexusBuildSettingsContext = (
+  settings: Record<string, unknown>
+): NexusContextBlock => {
+  return nexusContextBlock(
+    "settings",
+    nexusSafeJson(
+      settings,
+      2000
+    ),
+    20
+  );
+};
+
+const nexusSortContextBlocks = (
+  blocks: NexusContextBlock[]
+): NexusContextBlock[] => {
+  return [...blocks].sort(
+    (a, b) => b.priority - a.priority
+  );
+};
+
+const nexusComposeAIContext = (
+  blocks: NexusContextBlock[]
+): string => {
+  const validBlocks =
+    nexusSortContextBlocks(
+      blocks
+    ).filter(
+      (block) =>
+        block.content.trim().length > 0
+    );
+
+  if (!validBlocks.length) {
+    return "";
+  }
+
+  return validBlocks
+    .map(
+      (block) =>
+        `[${block.source}]\n${block.content}`
+    )
+    .join("\n\n");
+};
+
+const nexusCreateAIContextPackage = (
+  data: {
+    memory?: unknown[];
+    tasks?: unknown[];
+    notes?: unknown[];
+    events?: unknown[];
+    timers?: unknown[];
+    messages?: Array<{
+      role: "user" | "assistant";
+      content: string;
+    }>;
+    settings?: Record<string, unknown>;
+  }
+): NexusAIContextPackage => {
+  const blocks: NexusContextBlock[] = [];
+
+  const memoryBlock =
+    nexusBuildMemoryContext(
+      data.memory ?? []
+    );
+
+  const taskBlock =
+    nexusBuildTaskContext(
+      data.tasks ?? []
+    );
+
+  const noteBlock =
+    nexusBuildNoteContext(
+      data.notes ?? []
+    );
+
+  const calendarBlock =
+    nexusBuildCalendarContext(
+      data.events ?? []
+    );
+
+  const timerBlock =
+    nexusBuildTimerContext(
+      data.timers ?? []
+    );
+
+  const chatBlock =
+    nexusBuildChatContext(
+      data.messages ?? []
+    );
+
+  if (memoryBlock) {
+    blocks.push(memoryBlock);
+  }
+
+  if (taskBlock) {
+    blocks.push(taskBlock);
+  }
+
+  if (noteBlock) {
+    blocks.push(noteBlock);
+  }
+
+  if (calendarBlock) {
+    blocks.push(calendarBlock);
+  }
+
+  if (timerBlock) {
+    blocks.push(timerBlock);
+  }
+
+  if (chatBlock) {
+    blocks.push(chatBlock);
+  }
+
+  if (data.settings) {
+    blocks.push(
+      nexusBuildSettingsContext(
+        data.settings
+      )
+    );
+  }
+
+  return {
+    blocks,
+    text: nexusComposeAIContext(
+      blocks
+    ),
+    createdAt: Date.now(),
+  };
+};
+
+const nexusBuildFinalAIContext = (
+  userMessage: string,
+  data: {
+    memory?: unknown[];
+    tasks?: unknown[];
+    notes?: unknown[];
+    events?: unknown[];
+    timers?: unknown[];
+    messages?: Array<{
+      role: "user" | "assistant";
+      content: string;
+    }>;
+    settings?: Record<string, unknown>;
+  }
+): string => {
+  const packageData =
+    nexusCreateAIContextPackage(
+      data
+    );
+
+  const commandPlan =
+    nexusActionRouter(
+      userMessage
+    );
+
+  const commandContext =
+    commandPlan.actions.length &&
+    commandPlan.actions[0].type !==
+      "unknown"
+      ? `\n\n[detected_action]\n${nexusFormatActionPlan(
+          commandPlan
+        )}`
+      : "";
+
+  return (
+    packageData.text +
+    commandContext
+  ).trim();
+};
+// ==============================
+// NEXUS — PART 42
+// FINAL AI REQUEST ORCHESTRATOR
+// ==============================
+
+type NexusAIOrchestrationResult = {
+  text: string;
+  usedAI: boolean;
+  actionPlan: NexusActionPlan;
+  context: NexusAIContextPackage;
+  error?: string;
+};
+
+const nexusOrchestrateAI = async (
+  userMessage: string,
+  data: {
+    memory?: unknown[];
+    tasks?: unknown[];
+    notes?: unknown[];
+    events?: unknown[];
+    timers?: unknown[];
+    messages?: Array<{
+      role: "user" | "assistant";
+      content: string;
+    }>;
+    settings?: Record<string, unknown>;
+  }
+): Promise<NexusAIOrchestrationResult> => {
+  const cleanMessage =
+    String(userMessage ?? "").trim();
+
+  const context =
+    nexusCreateAIContextPackage(data);
+
+  const actionPlan =
+    nexusActionRouter(cleanMessage);
+
+  if (!cleanMessage) {
+    return {
+      text: "Напиши сообщение, и я отвечу.",
+      usedAI: false,
+      actionPlan,
+      context,
+    };
+  }
+
+  try {
+    const text =
+      await nexusProcessAIMessage(
+        {
+          messages:
+            data.messages ?? [],
+        },
+        cleanMessage,
+        nexusBuildFinalAIContext(
+          cleanMessage,
+          data
+        )
+      );
+
+    return {
+      text,
+      usedAI: true,
+      actionPlan,
+      context,
+    };
+  } catch (error) {
+    return {
+      text: nexusAIErrorResponse(
+        error instanceof Error
+          ? error.message
+          : ""
+      ),
+      usedAI: false,
+      actionPlan,
+      context,
+      error:
+        error instanceof Error
+          ? error.message
+          : "AI request failed",
+    };
+  }
+};
+
+// ==============================
+// SIMPLE AI CONNECTION TEST
+// ==============================
+
+const nexusRunAIConnectionTest =
+  async (): Promise<{
+    success: boolean;
+    message: string;
+  }> => {
+    const success =
+      await nexusTestAIConnection();
+
+    if (success) {
+      return {
+        success: true,
+        message:
+          "NEXUS AI connection is working.",
+      };
+    }
+
+    return {
+      success: false,
+      message:
+        "NEXUS AI connection failed.",
+    };
+  };
+
+// ==============================
+// AI REQUEST GUARD
+// ==============================
+
+const nexusIsValidAIMessage = (
+  message: string
+): boolean => {
+  const clean = String(
+    message ?? ""
+  ).trim();
+
+  return (
+    clean.length > 0 &&
+    clean.length <= 12000
+  );
+};
+
+const nexusPrepareSafeAIMessage = (
+  message: string
+): string => {
+  return String(message ?? "")
+    .trim()
+    .slice(0, 12000);
+};
+
+// ==============================
+// AI LANGUAGE HINT
+// ==============================
+
+const nexusLanguageInstruction = (
+  language: string
+): string => {
+  const map: Record<string, string> = {
+    ru: "Отвечай на русском языке.",
+    en: "Answer in English.",
+    es: "Responde en español.",
+    fr: "Réponds en français.",
+    ja: "日本語で回答してください。",
+  };
+
+  return (
+    map[language] ||
+    "Отвечай на языке пользователя."
+  );
+};
+
+const nexusBuildLocalizedAIContext = (
+  language: string,
+  context: string
+): string => {
+  const instruction =
+    nexusLanguageInstruction(
+      language
+    );
+
+  return [
+    instruction,
+    context.trim(),
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+};
+
+// ==============================
+// FINAL AI ENTRY POINT
+// ==============================
+
+const nexusAskAI = async (
+  message: string,
+  options?: {
+    language?: string;
+    memory?: unknown[];
+    tasks?: unknown[];
+    notes?: unknown[];
+    events?: unknown[];
+    timers?: unknown[];
+    messages?: Array<{
+      role: "user" | "assistant";
+      content: string;
+    }>;
+    settings?: Record<string, unknown>;
+  }
+): Promise<string> => {
+  if (!nexusIsValidAIMessage(message)) {
+    return "Напиши сообщение, и я постараюсь помочь.";
+  }
+
+  const cleanMessage =
+    nexusPrepareSafeAIMessage(
+      message
+    );
+
+  const data = {
+    memory: options?.memory ?? [],
+    tasks: options?.tasks ?? [],
+    notes: options?.notes ?? [],
+    events: options?.events ?? [],
+    timers: options?.timers ?? [],
+    messages: options?.messages ?? [],
+    settings: options?.settings ?? {},
+  };
+
+  const baseContext =
+    nexusBuildFinalAIContext(
+      cleanMessage,
+      data
+    );
+
+  const context =
+    nexusBuildLocalizedAIContext(
+      options?.language ?? "ru",
+      baseContext
+    );
+
+  try {
+    return await nexusProcessAIMessage(
+      {
+        messages: data.messages,
+      },
+      cleanMessage,
+      context
+    );
+  } catch (error) {
+    return nexusAIErrorResponse(
+      error instanceof Error
+        ? error.message
+        : ""
+    );
+  }
+};
+// ==============================
+// NEXUS — PART 43
+// AI REQUEST ADAPTER
+// ==============================
+
+type NexusAIAdapterRequest = {
+  message: string;
+  history: NexusAIMessage[];
+  context: string;
+  language: string;
+};
+
+type NexusAIAdapterResponse = {
+  success: boolean;
+  text: string;
+  error?: string;
+};
+
+const nexusCreateAIAdapterRequest = (
+  message: string,
+  history: NexusAIMessage[],
+  context: string,
+  language = "ru"
+): NexusAIAdapterRequest => ({
+  message: nexusPrepareSafeAIMessage(message),
+  history: nexusBuildAIHistory(history, 24),
+  context: context.trim(),
+  language,
+});
+
+const nexusSendAdapterRequest = async (
+  request: NexusAIAdapterRequest
+): Promise<NexusAIAdapterResponse> => {
+  if (
+    !nexusIsValidAIMessage(
+      request.message
+    )
+  ) {
+    return {
+      success: false,
+      text: "",
+      error: "Invalid message",
+    };
+  }
+
+  const localizedContext =
+    nexusBuildLocalizedAIContext(
+      request.language,
+      request.context
+    );
+
+  const result =
+    await nexusRequestAI(
+      [
+        ...request.history,
+        {
+          role: "user",
+          content: request.message,
+        },
+      ],
+      localizedContext
+    );
+
+  if (!result.ok) {
+    return {
+      success: false,
+      text: "",
+      error:
+        result.error ||
+        "AI request failed",
+    };
+  }
+
+  return {
+    success: true,
+    text:
+      nexusNormalizeAIResponse(
+        result.text
+      ),
+  };
+};
+
+const nexusCreateDirectAIRequest =
+  async (
+    message: string,
+    history: NexusAIMessage[] = [],
+    context = "",
+    language = "ru"
+  ): Promise<NexusAIAdapterResponse> => {
+    const request =
+      nexusCreateAIAdapterRequest(
+        message,
+        history,
+        context,
+        language
+      );
+
+    return nexusSendAdapterRequest(
+      request
+    );
+  };
+
+// ==============================
+// AI RESPONSE VALIDATION
+// ==============================
+
+const nexusValidateAIOutput = (
+  value: unknown
+): {
+  valid: boolean;
+  text: string;
+} => {
+  const text =
+    nexusNormalizeAIResponse(value);
+
+  if (!text) {
+    return {
+      valid: false,
+      text: "",
+    };
+  }
+
+  if (text.length > 30000) {
+    return {
+      valid: true,
+      text: text.slice(0, 30000),
+    };
+  }
+
+  return {
+    valid: true,
+    text,
+  };
+};
+
+// ==============================
+// AI CONVERSATION MEMORY
+// ==============================
+
+const nexusAppendAIConversation =
+  (
+    history: NexusAIMessage[],
+    userMessage: string,
+    assistantMessage: string,
+    limit = 40
+  ): NexusAIMessage[] => {
+    const next = [
+      ...history,
+      {
+        role: "user" as const,
+        content: userMessage,
+      },
+      {
+        role: "assistant" as const,
+        content: assistantMessage,
+      },
+    ];
+
+    return next.slice(-limit);
+  };
+
+// ==============================
+// AI REQUEST RETRY
+// ==============================
+
+const nexusRequestAIWithRetry =
+  async (
+    request: NexusAIAdapterRequest,
+    retries = 1
+  ): Promise<NexusAIAdapterResponse> => {
+    let lastResult:
+      | NexusAIAdapterResponse
+      | null = null;
+
+    for (
+      let attempt = 0;
+      attempt <= retries;
+      attempt++
+    ) {
+      lastResult =
+        await nexusSendAdapterRequest(
+          request
+        );
+
+      if (lastResult.success) {
+        return lastResult;
+      }
+
+      if (
+        lastResult.error
+          ?.toLowerCase()
+          .includes("401")
+      ) {
+        break;
+      }
+    }
+
+    return (
+      lastResult || {
+        success: false,
+        text: "",
+        error: "AI request failed",
+      }
+    );
+  };
+// ==============================
+// NEXUS — PART 44
+// AI CONVERSATION CONTROLLER
+// ==============================
+
+type NexusAIControllerState = {
+  busy: boolean;
+  lastUserMessage: string;
+  lastAssistantMessage: string;
+  conversation: NexusAIMessage[];
+  error: string;
+};
+
+const nexusCreateAIControllerState =
+  (): NexusAIControllerState => ({
+    busy: false,
+    lastUserMessage: "",
+    lastAssistantMessage: "",
+    conversation: [],
+    error: "",
+  });
+
+const nexusControllerAddMessage = (
+  state: NexusAIControllerState,
+  message: NexusAIMessage,
+  limit = 40
+): NexusAIControllerState => ({
+  ...state,
+  conversation: [
+    ...state.conversation,
+    message,
+  ].slice(-limit),
+});
+
+const nexusControllerSetBusy = (
+  state: NexusAIControllerState,
+  busy: boolean
+): NexusAIControllerState => ({
+  ...state,
+  busy,
+});
+
+const nexusControllerReset = (
+  state: NexusAIControllerState
+): NexusAIControllerState =>
+  nexusCreateAIControllerState();
+
+const nexusControllerSend = async (
+  state: NexusAIControllerState,
+  message: string,
+  options?: {
+    context?: string;
+    language?: string;
+  }
+): Promise<{
+  state: NexusAIControllerState;
+  response: string;
+}> => {
+  const cleanMessage =
+    nexusPrepareSafeAIMessage(
+      message
+    );
+
+  if (
+    !nexusIsValidAIMessage(
+      cleanMessage
+    )
+  ) {
+    return {
+      state: {
+        ...state,
+        error: "Пустое сообщение.",
+      },
+      response: "",
+    };
+  }
+
+  let nextState =
+    nexusControllerSetBusy(
+      {
+        ...state,
+        error: "",
+        lastUserMessage:
+          cleanMessage,
+      },
+      true
+    );
+
+  const request =
+    nexusCreateAIAdapterRequest(
+      cleanMessage,
+      nextState.conversation,
+      options?.context ?? "",
+      options?.language ?? "ru"
+    );
+
+  const result =
+    await nexusRequestAIWithRetry(
+      request,
+      1
+    );
+
+  if (!result.success) {
+    const error =
+      result.error ||
+      "AI request failed";
+
+    return {
+      state: {
+        ...nextState,
+        busy: false,
+        error,
+      },
+      response:
+        nexusAIErrorResponse(error),
+    };
+  }
+
+  const validation =
+    nexusValidateAIOutput(
+      result.text
+    );
+
+  if (!validation.valid) {
+    return {
+      state: {
+        ...nextState,
+        busy: false,
+        error:
+          "AI returned an empty response.",
+      },
+      response:
+        "AI не вернул ответ.",
+    };
+  }
+
+  nextState =
+    nexusControllerAddMessage(
+      nextState,
+      {
+        role: "user",
+        content: cleanMessage,
+      }
+    );
+
+  nextState =
+    nexusControllerAddMessage(
+      nextState,
+      {
+        role: "assistant",
+        content: validation.text,
+      }
+    );
+
+  return {
+    state: {
+      ...nextState,
+      busy: false,
+      lastAssistantMessage:
+        validation.text,
+      error: "",
+    },
+    response: validation.text,
+  };
+};
+
+// ==============================
+// CONVERSATION EXPORT
+// ==============================
+
+const nexusExportAIConversation = (
+  state: NexusAIControllerState
+): string => {
+  return JSON.stringify(
+    {
+      exportedAt: new Date().toISOString(),
+      messages: state.conversation,
+    },
+    null,
+    2
+  );
+};
+
+const nexusConversationToText = (
+  state: NexusAIControllerState
+): string => {
+  return state.conversation
+    .map(
+      (message) =>
+        `${message.role === "user" ? "User" : "NEXUS"}: ${message.content}`
+    )
+    .join("\n\n");
+};
+// ============================================================
+// NEXUS — PART 45
+// SERVER AI API ROUTE
+// FILE: app/api/chat/route.ts
+// ============================================================
+
+import OpenAI from "openai";
+import { NextResponse } from "next/server";
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+
+type ChatMessage = {
+  role: "user" | "assistant" | "system";
+  content: string;
+};
+
+type ChatRequest = {
+  model?: string;
+  messages?: ChatMessage[];
+  system?: string;
+};
+
+export async function POST(request: Request) {
+  try {
+    if (!process.env.OPENAI_API_KEY) {
+      return NextResponse.json(
+        {
+          error: "OPENAI_API_KEY is not configured",
+        },
+        {
+          status: 500,
+        }
+      );
+    }
+
+    const body =
+      (await request.json()) as ChatRequest;
+
+    const messages =
+      Array.isArray(body.messages)
+        ? body.messages
+        : [];
+
+    const systemInstruction =
+      body.system ||
+      `
+Ты NEXUS — персональный AI-помощник.
+
+Отвечай естественно, понятно и по делу.
+Учитывай контекст предыдущих сообщений.
+Не выдумывай факты, которых нет в контексте.
+Если пользователь пишет коротко — отвечай коротко.
+Если пользователь просит подробное объяснение — объясняй подробно.
+
+NEXUS не должен изображать отдельного персонажа.
+Главная задача — быть полезным персональным AI,
+который со временем адаптируется к стилю общения пользователя.
+`;
+
+    const input = messages
+      .filter(
+        (message) =>
+          message.role !== "system" &&
+          typeof message.content === "string" &&
+          message.content.trim().length > 0
+      )
+      .map((message) => ({
+        role:
+          message.role === "assistant"
+            ? "assistant"
+            : "user",
+        content: message.content,
+      }));
+
+    if (input.length === 0) {
+      return NextResponse.json(
+        {
+          error: "No messages provided",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    const response =
+      await openai.responses.create({
+        model:
+          body.model ||
+          "gpt-5.6",
+
+        instructions:
+          systemInstruction,
+
+        input,
+      });
+
+    const text =
+      response.output_text?.trim() ||
+      "Я не смог сформировать ответ.";
+
+    return NextResponse.json({
+      text,
+      model:
+        body.model ||
+        "gpt-5.6",
+      success: true,
+    });
+  } catch (error) {
+    console.error(
+      "NEXUS AI API ERROR:",
+      error
+    );
+
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unknown AI error",
+        success: false,
+      },
+      {
+        status: 500,
+      }
+    );
+  }
+}
+// ============================================================
+// NEXUS — PART 46
+// AI CONNECTION + REQUEST VALIDATION LAYER
+// ============================================================
+
+type NexusLiveAIStatus =
+  | "idle"
+  | "connecting"
+  | "online"
+  | "error";
+
+type NexusLiveAIResult = {
+  success: boolean;
+  text: string;
+  error?: string;
+};
+
+type NexusLiveAIOptions = {
+  message: string;
+  history?: NexusAIMessage[];
+  system?: string;
+  model?: string;
+};
+
+const nexusLiveAIState = {
+  status: "idle" as NexusLiveAIStatus,
+  lastError: "",
+  lastResponseAt: 0,
+};
+
+function nexusValidateLiveAIMessage(
+  message: string
+): boolean {
+  return (
+    typeof message === "string" &&
+    message.trim().length > 0 &&
+    message.trim().length <= 20000
+  );
+}
+
+function nexusCleanLiveAIMessage(
+  message: string
+): string {
+  return message
+    .replace(/\u0000/g, "")
+    .trim()
+    .slice(0, 20000);
+}
+
+function nexusBuildLiveAIHistory(
+  history: NexusAIMessage[] = []
+): NexusAIMessage[] {
+  return history
+    .filter(
+      (item) =>
+        item &&
+        (item.role === "user" ||
+          item.role === "assistant") &&
+        typeof item.content === "string" &&
+        item.content.trim().length > 0
+    )
+    .slice(-30)
+    .map((item) => ({
+      role: item.role,
+      content: item.content.trim().slice(0, 10000),
+    }));
+}
+
+async function nexusCallLiveAI(
+  options: NexusLiveAIOptions
+): Promise<NexusLiveAIResult> {
+  const cleanMessage =
+    nexusCleanLiveAIMessage(
+      options.message
+    );
+
+  if (
+    !nexusValidateLiveAIMessage(
+      cleanMessage
+    )
+  ) {
+    return {
+      success: false,
+      text: "",
+      error: "Сообщение пустое или слишком длинное.",
+    };
+  }
+
+  nexusLiveAIState.status =
+    "connecting";
+  nexusLiveAIState.lastError = "";
+
+  const history =
+    nexusBuildLiveAIHistory(
+      options.history
+    );
+
+  const messages: NexusAIMessage[] = [
+    ...history,
+    {
+      role: "user",
+      content: cleanMessage,
+    },
+  ];
+
+  try {
+    const controller =
+      new AbortController();
+
+    const timeout =
+      setTimeout(() => {
+        controller.abort();
+      }, 60000);
+
+    const response =
+      await fetch("/api/chat", {
+        method: "POST",
+        headers: {
+          "Content-Type":
+            "application/json",
+        },
+        body: JSON.stringify({
+          model:
+            options.model ||
+            "gpt-5.6",
+          messages,
+          system:
+            options.system ||
+            nexusBuildAISystemInstruction(),
+        }),
+        signal:
+          controller.signal,
+      });
+
+    clearTimeout(timeout);
+
+    let data:
+      | {
+          success?: boolean;
+          text?: string;
+          error?: string;
+        }
+      | null = null;
+
+    try {
+      data = await response.json();
+    } catch {
+      data = null;
+    }
+
+    if (
+      !response.ok ||
+      !data?.text
+    ) {
+      const errorMessage =
+        data?.error ||
+        `AI API error: ${response.status}`;
+
+      nexusLiveAIState.status =
+        "error";
+
+      nexusLiveAIState.lastError =
+        errorMessage;
+
+      return {
+        success: false,
+        text: "",
+        error: errorMessage,
+      };
+    }
+
+    const text =
+      data.text.trim();
+
+    if (!text) {
+      nexusLiveAIState.status =
+        "error";
+
+      nexusLiveAIState.lastError =
+        "AI вернул пустой ответ.";
+
+      return {
+        success: false,
+        text: "",
+        error:
+          "AI вернул пустой ответ.",
+      };
+    }
+
+    nexusLiveAIState.status =
+      "online";
+
+    nexusLiveAIState.lastResponseAt =
+      Date.now();
+
+    return {
+      success: true,
+      text,
+    };
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Неизвестная ошибка подключения к AI.";
+
+    nexusLiveAIState.status =
+      "error";
+
+    nexusLiveAIState.lastError =
+      message;
+
+    return {
+      success: false,
+      text: "",
+      error: message,
+    };
+  }
+}
+
+async function nexusSendLiveAIMessage(
+  message: string,
+  history: NexusAIMessage[] = []
+): Promise<string> {
+  const result =
+    await nexusCallLiveAI({
+      message,
+      history,
+    });
+
+  if (result.success) {
+    return result.text;
+  }
+
+  return (
+    "Не удалось получить ответ от NEXUS AI. " +
+    "Проверь подключение к серверу."
+  );
+}
+
+function nexusGetLiveAIStatus(): NexusLiveAIStatus {
+  return nexusLiveAIState.status;
+}
+
+function nexusGetLiveAIError(): string {
+  return nexusLiveAIState.lastError;
+}
+
+function nexusIsLiveAIOnline(): boolean {
+  return (
+    nexusLiveAIState.status ===
+    "online"
+  );
+}
+
+async function nexusPingLiveAI(): Promise<boolean> {
+  const result =
+    await nexusCallLiveAI({
+      message:
+        "Ответь одним словом: OK",
+      history: [],
+    });
+
+  return result.success;
+}
 
